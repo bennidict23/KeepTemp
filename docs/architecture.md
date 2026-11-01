@@ -28,6 +28,14 @@ Side Panel 读取扩展数据库，以本地轮询观察跨页提交；全文搜
 
 ## 权限与限制
 
-API 权限仅 sidePanel；声明式内容脚本限定 chatgpt.com。无 cookies、webRequest、tabs、clipboardRead、unlimitedStorage 或 scripting 权限。生产扩展 CSP connect-src none，不引入远程代码或字体。
+API 权限为 sidePanel 和 scripting；声明式与手动补加载脚本的 host 权限都精确限定 https://chatgpt.com/*。无 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage 权限。生产扩展 CSP connect-src none，不引入远程代码或字体。
 
 已知限制：DOM 和 Temporary 信号依赖平台布局；未观察历史、附件、隐藏状态不保存；立即关闭可能丢失未提交尾部；跨浏览器重启 tab id 不保证稳定；不提供分支版本历史；全文搜索适合小库；长上下文只做字符启发提醒；数据库未加密且不替代备份。
+
+## 中途接管
+
+Side Panel 的 current-chat 控制器只查询当前窗口的活动标签页，验证精确 origin，排除共享链接，不退而挑选其他聊天。先 ping 已存在脚本，只有接收器缺失时才通过 scripting 注入打包的同一脚本。页面 URL、DOM 和对话不重建。
+
+内容脚本只接受同一扩展页面发出的 inspect/record 控制消息。inspect 仅确认临时模式；record 抽取当前快照，再向后台发 start-current。后台仍验证顶层来源、数据 schema 与本地授权。StorageRepository 在同一个事务内检查 paused/tombstone，然后保存快照并开启自动捕获；失败主动 abort，避免只开启授权却没保存。被暂停、排除或删除的会话不会重建。
+
+后续轮询复用同一身份和去重逻辑。重复接管不会再注入一个状态浮层或建立另一会话。内容脚本只处理页面已挂载文字，不承诺补全此前已虚拟化移除的消息。

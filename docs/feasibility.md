@@ -16,7 +16,7 @@
 
 ## Chrome 与发布
 
-[Side Panel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel) 需要 sidePanel 权限；页面读取通过 chatgpt.com 限定内容脚本。[商店用户数据要求](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq) 同样适用于只在本地处理数据的扩展。项目尚未上架，正式发布前应复核条款、发布可访问隐私政策并准确披露数据用途。
+[Side Panel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel) 需要 sidePanel 权限；页面读取通过 chatgpt.com 限定内容脚本。中途接管使用 [scripting](https://developer.chrome.com/docs/extensions/reference/api/scripting) 给已打开页面补加载脚本，需 scripting 与 chatgpt.com 的精确 host 权限。[商店用户数据要求](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq) 同样适用于只在本地处理数据的扩展。项目尚未上架，正式发布前应复核条款、发布可访问隐私政策并准确披露数据用途。
 
 [TCX Temporary Chat Saver](https://chromewebstore.google.com/detail/tcx-temporary-chat-saver/cgjidpkaabokdjlfaakggpdopmieijle) 也声明提供本地保存，因此不宣称首创。KeepTemp 的产品取舍是无感自动保存、最少控制、本地可找回、真实提交状态及可审计边界。
 

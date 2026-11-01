@@ -2,6 +2,7 @@ import type { Snapshot } from "./model";
 export type BridgeRequest =
   | { type: "keeptemp:state"; id?: string }
   | { type: "keeptemp:capture"; snapshot: Snapshot }
+  | { type: "keeptemp:start-current"; snapshot: Snapshot }
   | { type: "keeptemp:exclude"; id: string }
   | { type: "keeptemp:pause"; id: string; paused: boolean };
 export interface BridgeResponse {

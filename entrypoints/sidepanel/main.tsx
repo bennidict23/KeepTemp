@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { StorageRepository } from "../../src/storage";
 import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
+import { recordCurrentChat, currentChatError } from "../../src/current-chat";
 import "../../src/style.css";
 const repo = new StorageRepository();
 function dateLabel(value: number) {
@@ -117,7 +118,9 @@ function App() {
   async function run(
     task: () => Promise<void>,
     success = "",
-    failure = "操作未完成，请检查本地存储空间后重试。",
+    failure:
+      | string
+      | ((error: unknown) => string) = "操作未完成，请检查本地存储空间后重试。",
   ) {
     setBusy(true);
     setNotice("");
@@ -126,9 +129,9 @@ function App() {
       apply(await load());
       setFailed(false);
       setNotice(success);
-    } catch {
+    } catch (error) {
       setFailed(true);
-      setNotice(failure);
+      setNotice(typeof failure === "function" ? failure(error) : failure);
     } finally {
       setBusy(false);
     }
@@ -339,13 +342,29 @@ function App() {
                   () => repo.setAutoCapture(!enabled),
                   enabled
                     ? "已关闭自动保存"
-                    : "已开启自动保存，请在新标签页开始临时聊天。",
+                    : "已开启自动保存。已有聊天可点击“记录当前临时会话”，无需刷新。",
                 )
               }
             >
               {enabled ? "关闭" : "开启"}
             </button>
           </div>
+          <button
+            className="record-current"
+            disabled={busy}
+            onClick={() =>
+              run(
+                () => recordCurrentChat(repo),
+                "已保存当前可读取的内容，后续将自动记录。",
+                currentChatError,
+              )
+            }
+          >
+            记录当前临时会话
+          </button>
+          <small className="record-hint">
+            已经聊到一半？保存现有可读文字，并继续自动记录。
+          </small>
           <a
             className="primary new-chat"
             href="https://chatgpt.com/?temporary-chat=true"

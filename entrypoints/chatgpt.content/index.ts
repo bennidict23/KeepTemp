@@ -1,11 +1,12 @@
 import { browser } from "wxt/browser";
-import { ChatGPTAdapter } from "../../src/chatgpt-adapter";
+import { ChatGPTAdapter, temporaryMode } from "../../src/chatgpt-adapter";
 import type { BridgeRequest, BridgeResponse } from "../../src/bridge";
 export default defineContentScript({
   matches: ["https://chatgpt.com/*"],
   runAt: "document_idle",
   main(ctx) {
     const adapter = new ChatGPTAdapter(document, () => new URL(location.href));
+    document.getElementById("keeptemp-status")?.remove();
     const host = document.createElement("div");
     host.id = "keeptemp-status";
     const shadow = host.attachShadow({ mode: "open" });
@@ -123,11 +124,11 @@ export default defineContentScript({
         "data-state",
       ],
     });
-    const tick = async () => {
-      if (busy || !ctx.isValid) return;
+    const tick = async (force = false): Promise<BridgeResponse> => {
+      if (busy || !ctx.isValid) return { ok: false, error: "busy" };
       busy = true;
       try {
-        if (Date.now() - lastState > 1200) {
+        if (force || Date.now() - lastState > 1200) {
           await state(activeId || undefined);
           lastState = Date.now();
         }
@@ -135,7 +136,7 @@ export default defineContentScript({
           lastSaved = "";
           dirty = true;
           say("尚未授权 · 未开启自动保存");
-          return;
+          return { ok: false, error: "consent-required" };
         }
         // Read only after consent; unknown or regular pages never produce a write.
         const s = adapter.read();
@@ -149,7 +150,17 @@ export default defineContentScript({
                 ? "等待临时对话内容"
                 : "等待临时对话",
           );
-          return;
+          const mode =
+            s?.temporary ?? temporaryMode(document, new URL(location.href));
+          return {
+            ok: false,
+            error:
+              mode === false
+                ? "regular"
+                : mode !== true
+                  ? "temporary-unknown"
+                  : "no-content",
+          };
         }
         if (activeId !== s.id) {
           activeId = s.id;
@@ -159,13 +170,13 @@ export default defineContentScript({
         }
         if (excluded) {
           say("此会话已排除");
-          return;
+          return { ok: false, error: "excluded" };
         }
         if (paused) {
           say("已暂停");
-          return;
+          return { ok: false, error: "paused" };
         }
-        if (!dirty) return;
+        if (!dirty && !force) return { ok: true, saved: Boolean(lastSaved) };
         const key = JSON.stringify([
           s.id,
           s.messages.map((m) => [m.id, m.role, m.text]),
@@ -173,7 +184,7 @@ export default defineContentScript({
         dirty = false;
         if (key === lastSaved) {
           say("Saved · 已存本机");
-          return;
+          return { ok: true, saved: true };
         }
         say("Saving…");
         const r = await send({ type: "keeptemp:capture", snapshot: s });
@@ -192,18 +203,100 @@ export default defineContentScript({
             dirty = true;
             say("内容已更新，等待保存");
           }
+          return { ok: true, saved: true };
         } else {
           dirty = true;
           lastState = 0;
           say("未保存 · 请检查授权或会话排除状态");
+          return { ok: false, error: "not-saved" };
         }
       } catch {
         dirty = true;
         say("保存失败 · 请保留此页，稍后重试");
+        return { ok: false, error: "storage-failed" };
       } finally {
         busy = false;
       }
     };
+    const onMessage: Parameters<
+      typeof browser.runtime.onMessage.addListener
+    >[0] = (request, sender, reply) => {
+      if (
+        sender.id !== browser.runtime.id ||
+        sender.tab ||
+        !sender.url?.startsWith(browser.runtime.getURL("/"))
+      )
+        return;
+      if (request?.type === "keeptemp:ping") {
+        reply({ ok: true });
+        return false;
+      }
+      if (request?.type === "keeptemp:inspect-current") {
+        const mode = temporaryMode(document, new URL(location.href));
+        reply(
+          mode === true
+            ? { ok: true }
+            : {
+                ok: false,
+                error: mode === false ? "regular" : "temporary-unknown",
+              },
+        );
+        return false;
+      }
+      if (request?.type === "keeptemp:record-current") {
+        if (busy) {
+          reply({ ok: false, error: "busy" });
+          return false;
+        }
+        const snapshot = adapter.read();
+        if (
+          !snapshot ||
+          snapshot.temporary !== true ||
+          !snapshot.messages.length
+        ) {
+          reply({ ok: false, error: "no-content" });
+          return false;
+        }
+        busy = true;
+        void send({ type: "keeptemp:start-current", snapshot })
+          .then(
+            (result) => {
+              if (result.ok && result.saved) {
+                activeId = snapshot.id;
+                consent = true;
+                lastState = 0;
+                dirty = true;
+                lastSaved = JSON.stringify([
+                  snapshot.id,
+                  snapshot.messages.map((m) => [m.id, m.role, m.text]),
+                ]);
+                const latest = adapter.read();
+                const key = latest
+                  ? JSON.stringify([
+                      latest.id,
+                      latest.messages.map((m) => [m.id, m.role, m.text]),
+                    ])
+                  : "";
+                say(
+                  key === lastSaved
+                    ? "Saved · 已存本机"
+                    : "内容已更新，等待保存",
+                );
+              }
+              reply(result);
+            },
+            () => {
+              say("保存失败 · 请保留此页，稍后重试");
+              reply({ ok: false, error: "storage-failed" });
+            },
+          )
+          .finally(() => {
+            busy = false;
+          });
+        return true;
+      }
+    };
+    browser.runtime.onMessage.addListener(onMessage);
     ctx.setInterval(() => void tick(), 350);
     void tick();
     ctx.addEventListener(window, "popstate", () => {
@@ -215,6 +308,7 @@ export default defineContentScript({
     });
     ctx.onInvalidated(() => {
       observer.disconnect();
+      browser.runtime.onMessage.removeListener(onMessage);
       host.remove();
     });
   },

@@ -42,68 +42,83 @@ export class StorageRepository {
   async get(id: string) {
     return (await this.db).get("sessions", id);
   }
-  async capture(snapshot: Snapshot) {
+  async capture(snapshot: Snapshot, enableCapture = false) {
     if (snapshot.temporary !== true || !snapshot.messages.length) return false;
     const db = await this.db;
     const tx = db.transaction(["sessions", "meta"], "readwrite");
-    if (!(await tx.objectStore("meta").get("consent"))) {
-      await tx.done;
-      return false;
-    }
-    if (
-      snapshot.source === "chatgpt" &&
-      !(await tx.objectStore("meta").get("chatgpt-consent"))
-    ) {
-      await tx.done;
-      return false;
-    }
-    const store = tx.objectStore("sessions");
-    const old = await store.get(snapshot.id);
-    if (old?.excluded || old?.deleted || old?.paused) {
-      await tx.done;
-      return false;
-    }
-    const messages = new Map(old?.messages.map((m) => [m.id, m]));
-    const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
-    const ordered = [...messages.values()]
-      .sort((a, b) => a.order - b.order)
-      .map((m) => m.id);
-    for (let i = 0; i < incoming.length; i++) {
-      const m = incoming[i]!;
-      const previous = messages.get(m.id);
-      if (!previous) {
-        // Older virtualized turns may be prepended when the user scrolls back.
-        const next = incoming.slice(i + 1).find((n) => ordered.includes(n.id));
-        const prev = [...incoming.slice(0, i)]
-          .reverse()
-          .find((n) => ordered.includes(n.id));
-        if (next) ordered.splice(ordered.indexOf(next.id), 0, m.id);
-        else if (prev) ordered.splice(ordered.indexOf(prev.id) + 1, 0, m.id);
-        else ordered.push(m.id);
+    try {
+      if (!(await tx.objectStore("meta").get("consent"))) {
+        await tx.done;
+        return false;
       }
-      if (!previous || m.updatedAt >= previous.updatedAt)
-        messages.set(m.id, {
-          ...m,
-          createdAt: previous?.createdAt ?? m.createdAt,
-        });
+      if (
+        snapshot.source === "chatgpt" &&
+        !enableCapture &&
+        !(await tx.objectStore("meta").get("chatgpt-consent"))
+      ) {
+        await tx.done;
+        return false;
+      }
+      const store = tx.objectStore("sessions");
+      const old = await store.get(snapshot.id);
+      if (old?.excluded || old?.deleted || old?.paused) {
+        await tx.done;
+        return false;
+      }
+      if (enableCapture && snapshot.source === "chatgpt")
+        await tx.objectStore("meta").put(true, "chatgpt-consent");
+      const messages = new Map(old?.messages.map((m) => [m.id, m]));
+      const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
+      const ordered = [...messages.values()]
+        .sort((a, b) => a.order - b.order)
+        .map((m) => m.id);
+      for (let i = 0; i < incoming.length; i++) {
+        const m = incoming[i]!;
+        const previous = messages.get(m.id);
+        if (!previous) {
+          // Older virtualized turns may be prepended when the user scrolls back.
+          const next = incoming
+            .slice(i + 1)
+            .find((n) => ordered.includes(n.id));
+          const prev = [...incoming.slice(0, i)]
+            .reverse()
+            .find((n) => ordered.includes(n.id));
+          if (next) ordered.splice(ordered.indexOf(next.id), 0, m.id);
+          else if (prev) ordered.splice(ordered.indexOf(prev.id) + 1, 0, m.id);
+          else ordered.push(m.id);
+        }
+        if (!previous || m.updatedAt >= previous.updatedAt)
+          messages.set(m.id, {
+            ...m,
+            createdAt: previous?.createdAt ?? m.createdAt,
+          });
+      }
+      const all = ordered.map((id, order) => ({ ...messages.get(id)!, order }));
+      const now = Date.now();
+      await store.put({
+        id: snapshot.id,
+        source: snapshot.source ?? "mock",
+        title:
+          old?.title ??
+          (all[0]?.text.slice(0, 70) ||
+            (snapshot.source === "chatgpt"
+              ? "ChatGPT Temporary Chat"
+              : "Synthetic chat")),
+        createdAt: old?.createdAt ?? now,
+        updatedAt: now,
+        messages: all,
+      });
+      await tx.done;
+      return true;
+    } catch {
+      try {
+        tx.abort();
+      } catch {
+        /* Already settled. */
+      }
+      await tx.done.catch(() => {});
+      throw new Error("storage-write-failed");
     }
-    const all = ordered.map((id, order) => ({ ...messages.get(id)!, order }));
-    const now = Date.now();
-    await store.put({
-      id: snapshot.id,
-      source: snapshot.source ?? "mock",
-      title:
-        old?.title ??
-        (all[0]?.text.slice(0, 70) ||
-          (snapshot.source === "chatgpt"
-            ? "ChatGPT Temporary Chat"
-            : "Synthetic chat")),
-      createdAt: old?.createdAt ?? now,
-      updatedAt: now,
-      messages: all,
-    });
-    await tx.done;
-    return true;
   }
   async importSession(session: Session) {
     const db = await this.db;

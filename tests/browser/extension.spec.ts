@@ -51,7 +51,12 @@ async function menu(p: Page) {
 }
 async function clear() {
   await panel.getByRole("button", { name: "返回对话列表" }).click();
-  await panel.getByText("本地数据与隐私", { exact: true }).click();
+  const privacy = panel
+    .locator("details.tools")
+    .filter({ has: panel.locator("summary", { hasText: "本地数据与隐私" }) });
+  if (!(await privacy.evaluate((el) => (el as HTMLDetailsElement).open)))
+    await privacy.locator("summary").click();
+  await expect(privacy).toHaveAttribute("open", "");
   panel.once("dialog", (d) => d.accept());
   await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
   await expect(
@@ -59,7 +64,10 @@ async function clear() {
   ).toBeVisible();
 }
 test.afterEach(async () => {
-  if (await panel.getByRole("button", { name: "返回对话列表" }).isVisible()) {
+  if (
+    !panel.isClosed() &&
+    (await panel.getByRole("button", { name: "返回对话列表" }).isVisible())
+  ) {
     if (
       !(await panel
         .getByRole("button", { name: "我了解并同意本地保存" })
@@ -293,7 +301,8 @@ test("minimal library fits narrow light and dark panels without development tool
   const manifest = JSON.parse(
     await fs.readFile(".output/chrome-mv3/manifest.json", "utf8"),
   );
-  expect(manifest.permissions).toEqual(["sidePanel"]);
+  expect(manifest.permissions).toEqual(["sidePanel", "scripting"]);
+  expect(manifest.host_permissions).toEqual(["https://chatgpt.com/*"]);
   expect(manifest.content_scripts[0].matches).toEqual([
     "https://chatgpt.com/*",
   ]);
@@ -346,4 +355,106 @@ test("homepage ellipsis menu renames and deletes without opening the conversatio
   await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
     "已排除",
   );
+});
+
+test("starts recording a conversation opened independently and already in progress", async () => {
+  const p = await chat();
+  await p.evaluate(
+    (html) => {
+      document
+        .querySelector("[data-chatgpt-conversation-selection-target]")!
+        .insertAdjacentHTML("beforeend", html);
+      document.body.insertAdjacentHTML(
+        "afterbegin",
+        '<header><button data-testid="temporary-chat-button" aria-pressed="true">Temporary</button></header>',
+      );
+      document.documentElement.dataset.sameDocument = "keep-me";
+      history.replaceState(null, "", "/c/mid-session-synthetic");
+    },
+    turn("prior-turn-2", "之前的第二个问题", "之前的第二个回答"),
+  );
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "已保存当前可读取的内容",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await expect(
+    panel.getByText("自动保存已开启", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await p.evaluate(() => document.documentElement.dataset.sameDocument),
+  ).toBe("keep-me");
+  expect(p.url()).toBe("https://chatgpt.com/c/mid-session-synthetic");
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "已保存当前可读取的内容",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  expect(await p.locator("#keeptemp-status").count()).toBe(1);
+  await p.evaluate(
+    (html) =>
+      document
+        .querySelector("[data-chatgpt-conversation-selection-target]")!
+        .insertAdjacentHTML("beforeend", html),
+    turn("continuing-turn", "继续聊天", "接管后的自动回复"),
+  );
+  await expect(panel.locator(".session")).toContainText("6 条消息");
+});
+
+test("hot-attaches when the old content script is absent without reloading the conversation", async () => {
+  const p = await chat();
+  await p.evaluate(() => {
+    document.documentElement.dataset.sameDocument = "preserved";
+    document.querySelector("[data-user-message-bubble]")!.textContent =
+      "existing synthetic chat, do not reload";
+  });
+  await expect(panel.locator(".session")).toHaveCount(0);
+  // Use WXT's context-invalidation signal to remove the receiver and observer.
+  // This exercises real missing-script reinjection, not Chrome's extension-reload lifecycle.
+  const eventName = `${new URL(base).host}:chatgpt:wxt:content-script-started`;
+  await panel.evaluate(async (name) => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    const [tab] = await chrome.tabs.query({ url: "https://chatgpt.com/*" });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab!.id! },
+      func: (event: string) => {
+        document.dispatchEvent(
+          new CustomEvent(event, {
+            detail: {
+              contentScriptName: "chatgpt",
+              messageId: "synthetic-invalidation",
+            },
+          }),
+        );
+      },
+      args: [name],
+    });
+  }, eventName);
+  await expect(p.locator("#keeptemp-status")).toHaveCount(0);
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "已保存当前可读取的内容",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session strong")).toContainText(
+    "existing synthetic chat, do not reload",
+  );
+  expect(
+    await p.evaluate(() => document.documentElement.dataset.sameDocument),
+  ).toBe("preserved");
+  expect(await p.locator("#keeptemp-status").count()).toBe(1);
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { StorageRepository } from "../src/storage";
 import {
   context,
@@ -237,5 +237,47 @@ it("renames without changing message text, last activity or losing the title on 
   expect((await r.get(original.id))?.title).toBe("我的项目讨论");
   await r.delete(original.id);
   await expect(r.rename(original.id, "must not resurrect")).rejects.toThrow();
+  expect(await r.list()).toEqual([]);
+});
+
+it("starting capture mid-session enables autosave only with a successful eligible write", async () => {
+  const r = new StorageRepository(crypto.randomUUID());
+  await r.authorize();
+  expect(await r.autoCapture()).toBe(false);
+  expect(await r.capture(snapshot(), true)).toBe(true);
+  expect(await r.autoCapture()).toBe(true);
+  await r.setAutoCapture(false);
+  await r.delete("thread:test");
+  expect(await r.capture(snapshot(), true)).toBe(false);
+  expect(await r.autoCapture()).toBe(false);
+  expect(
+    await r.capture({ ...snapshot("regular"), temporary: false }, true),
+  ).toBe(false);
+  expect(await r.autoCapture()).toBe(false);
+});
+
+it("rolls back enabling capture when the first manual write fails", async () => {
+  const r = new StorageRepository(crypto.randomUUID());
+  await r.authorize();
+  const original = IDBObjectStore.prototype.put;
+  const stub = vi
+    .spyOn(IDBObjectStore.prototype, "put")
+    .mockImplementation(function (
+      this: IDBObjectStore,
+      value: unknown,
+      key?: IDBValidKey,
+    ) {
+      if (this.name === "sessions")
+        throw new DOMException("synthetic write failure", "QuotaExceededError");
+      return original.call(this, value, key);
+    });
+  try {
+    await expect(r.capture(snapshot(), true)).rejects.toThrow(
+      "storage-write-failed",
+    );
+  } finally {
+    stub.mockRestore();
+  }
+  expect(await r.autoCapture()).toBe(false);
   expect(await r.list()).toEqual([]);
 });

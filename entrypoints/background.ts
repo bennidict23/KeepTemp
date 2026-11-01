@@ -37,6 +37,30 @@ export default defineBackground(() => {
       void (async (): Promise<BridgeResponse> => {
         try {
           const consent = (await repo.consent()) && (await repo.autoCapture());
+          if (data.type === "keeptemp:start-current") {
+            if (!(await repo.consent()))
+              return { ok: false, error: "consent-required" };
+            if (!validSnapshot(data.snapshot))
+              return { ok: false, error: "unsupported-data" };
+            const snapshot = {
+              ...data.snapshot,
+              id: scopedChatId(tabId, data.snapshot.id),
+              source: "chatgpt" as const,
+            };
+            const saved = await repo.capture(snapshot, true);
+            if (!saved) {
+              const s = await repo.get(snapshot.id);
+              return {
+                ok: false,
+                error: s?.paused
+                  ? "paused"
+                  : s?.deleted || s?.excluded
+                    ? "excluded"
+                    : "not-saved",
+              };
+            }
+            return { ok: true, consent: true, saved: true };
+          }
           if (!consent) return { ok: true, consent: false, saved: false };
           if (data.type === "keeptemp:capture") {
             if (!validSnapshot(data.snapshot))
