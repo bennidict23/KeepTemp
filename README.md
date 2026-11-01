@@ -4,6 +4,8 @@
 
 KeepTemp 是一个本地优先的 Chrome 扩展，为 ChatGPT Temporary Chat 保存文字副本。无需账号、后端或 API Key，不上传聊天，不把临时会话转换成平台普通历史。
 
+产品方向与每次迭代的判断依据见 [产品初心与长期提示词](docs/product-brief.md)。
+
 ## 使用
 
 1. 在 `chrome://extensions` 加载已解压扩展，选择 `path/to/KeepTemp/.output/chrome-mv3`。macOS 文件选择器可按 Cmd+Shift+G 输入隐藏目录路径。
