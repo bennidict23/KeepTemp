@@ -220,3 +220,19 @@ describe("recovery and exports", () => {
     expect(context(long)).toContain("字".repeat(25000));
   });
 });
+
+it("renames without changing message text, last activity or losing the title on subsequent capture", async () => {
+  const r = await repo();
+  await r.capture(snapshot());
+  const original = (await r.list())[0]!;
+  await r.rename(original.id, "  我的项目讨论  ");
+  const renamed = (await r.get(original.id))!;
+  expect(renamed.title).toBe("我的项目讨论");
+  expect(renamed.messages).toEqual(original.messages);
+  expect(renamed.updatedAt).toBe(original.updatedAt);
+  await r.capture(snapshot(original.id, "updated synthetic", 2));
+  expect((await r.get(original.id))?.title).toBe("我的项目讨论");
+  await r.delete(original.id);
+  await expect(r.rename(original.id, "must not resurrect")).rejects.toThrow();
+  expect(await r.list()).toEqual([]);
+});

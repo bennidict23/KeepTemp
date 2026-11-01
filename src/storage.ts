@@ -127,6 +127,19 @@ export class StorageRepository {
     if (s && !s.deleted) await tx.store.put({ ...s, paused });
     await tx.done;
   }
+  async rename(id: string, title: string) {
+    const name = title.trim().replace(/\s+/g, " ");
+    if (!name || name.length > 100) throw new Error("invalid-title");
+    const db = await this.db;
+    const tx = db.transaction("sessions", "readwrite");
+    const s = await tx.store.get(id);
+    if (!s || s.deleted) {
+      await tx.done;
+      throw new Error("session-not-found");
+    }
+    await tx.store.put({ ...s, title: name });
+    await tx.done;
+  }
   async delete(id: string) {
     const db = await this.db;
     const tx = db.transaction("sessions", "readwrite");

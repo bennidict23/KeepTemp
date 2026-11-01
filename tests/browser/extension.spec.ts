@@ -298,3 +298,52 @@ test("minimal library fits narrow light and dark panels without development tool
     "https://chatgpt.com/*",
   ]);
 });
+
+test("homepage ellipsis menu renames and deletes without opening the conversation", async () => {
+  await enable();
+  const p = await chat();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  const trigger = panel.getByRole("button", { name: /^会话操作：/ });
+  await trigger.click();
+  await expect(panel.getByRole("menu")).toBeVisible();
+  await panel.keyboard.press("Escape");
+  await expect(panel.getByRole("menu")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await panel.getByRole("menuitem", { name: "重命名", exact: true }).click();
+  await panel.getByRole("textbox", { name: "会话名称" }).fill("我的项目讨论");
+  await panel.getByRole("button", { name: "保存名称" }).click();
+  await expect(panel.locator(".session strong")).toHaveText("我的项目讨论");
+  await p.evaluate(
+    () =>
+      (document.querySelector("[data-markdown-text-style] p")!.textContent =
+        "capture after rename"),
+  );
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "capture after rename",
+  );
+  await expect(panel.locator(".session strong")).toHaveText("我的项目讨论");
+  await panel.reload();
+  await expect(panel.locator(".session strong")).toHaveText("我的项目讨论");
+  await panel.getByRole("button", { name: "会话操作：我的项目讨论" }).click();
+  await panel.screenshot({
+    path: "docs/library-menu-preview.png",
+    fullPage: true,
+  });
+  panel.once("dialog", (d) => d.dismiss());
+  await panel.getByRole("menuitem", { name: "删除", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await panel.getByRole("button", { name: "会话操作：我的项目讨论" }).click();
+  panel.once("dialog", (d) => d.accept());
+  await panel.getByRole("menuitem", { name: "删除", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "已排除",
+  );
+});

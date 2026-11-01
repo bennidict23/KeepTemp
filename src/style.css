@@ -510,3 +510,88 @@ summary {
     color: #e8dcb5;
   }
 }
+
+.session-row {
+  position: relative;
+}
+.session-row .session-meta {
+  padding-right: 28px;
+}
+.session-row .session strong {
+  padding-right: 18px;
+}
+.session-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.more-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 23px;
+  line-height: 1;
+  border-radius: 7px;
+}
+.more-trigger[aria-expanded="true"],
+.more-trigger:hover {
+  background: var(--soft);
+  color: var(--ink);
+}
+.session-menu {
+  position: absolute;
+  right: 0;
+  top: 36px;
+  z-index: 6;
+  min-width: 138px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 6px 24px #00000012;
+}
+.session-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+  padding: 10px 12px;
+  background: transparent;
+}
+.session-menu button:hover,
+.session-menu button:focus-visible {
+  background: var(--soft);
+}
+.rename-editor {
+  padding: 16px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.rename-editor label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+.rename-editor input {
+  margin-bottom: 12px;
+  padding: 10px;
+}
+.rename-editor > div {
+  display: flex;
+  gap: 8px;
+}
+.rename-editor button {
+  font-size: 12px;
+  padding: 8px 12px;
+}

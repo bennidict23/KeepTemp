@@ -30,6 +30,39 @@ function App() {
     [notice, setNotice] = useState(""),
     [failed, setFailed] = useState(false),
     [copied, setCopied] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+  const focusActions = (id: string) =>
+    requestAnimationFrame(() =>
+      document.getElementById(`session-actions-${id}`)?.focus(),
+    );
+  useEffect(() => {
+    if (!menuId) return;
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.focus();
+    const outside = (event: PointerEvent) => {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest(".session-actions")
+      )
+        setMenuId(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuId(null);
+        focusActions(menuId);
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menuId]);
   const listScroll = useRef(0);
   const current = sessions.find((s) => s.id === selected);
   async function load() {
@@ -78,6 +111,8 @@ function App() {
   useEffect(() => {
     window.scrollTo(0, selected ? 0 : listScroll.current);
     setCopied(false);
+    setMenuId(null);
+    setEditingId(null);
   }, [selected]);
   async function run(
     task: () => Promise<void>,
@@ -97,6 +132,15 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+  function deleteSession(session: Session) {
+    setMenuId(null);
+    if (!confirm(`删除“${session.title}”？无法撤销，也不会删除平台端的记录。`))
+      return;
+    void run(async () => {
+      await repo.delete(session.id);
+      setSelected((id) => (id === session.id ? null : id));
+    }, "已删除本地对话");
   }
   function exportFile(s: Session, kind: "md" | "json") {
     const url = URL.createObjectURL(
@@ -188,17 +232,7 @@ function App() {
             <button
               className="danger delete-session"
               disabled={busy}
-              onClick={() => {
-                if (
-                  confirm(
-                    "删除这段本地对话？无法撤销，也不会删除平台端的记录。",
-                  )
-                )
-                  void run(async () => {
-                    await repo.delete(current.id);
-                    setSelected(null);
-                  }, "已删除本地对话");
-              }}
+              onClick={() => deleteSession(current)}
             >
               删除会话
             </button>
@@ -330,31 +364,163 @@ function App() {
           <div className="list" aria-label="本地会话">
             {visible.length ? (
               visible.map((s) => (
-                <button
-                  className="session"
-                  key={s.id}
-                  onClick={() => {
-                    listScroll.current = window.scrollY;
-                    setSelected(s.id);
-                  }}
-                >
-                  <span className="session-meta">
-                    <span>{s.excluded ? "已停止保存" : "临时对话"}</span>
-                    <time
-                      dateTime={new Date(s.updatedAt).toISOString()}
-                      title={new Date(s.updatedAt).toLocaleString()}
+                <div className="session-row" key={s.id}>
+                  {editingId === s.id ? (
+                    <form
+                      className="rename-editor"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void run(
+                          async () => {
+                            await repo.rename(s.id, editingTitle);
+                            setEditingId(null);
+                            focusActions(s.id);
+                          },
+                          "名称已更新",
+                          "重命名未完成，请输入 1–100 个字符，并确认对话仍然存在。",
+                        );
+                      }}
                     >
-                      {dateLabel(s.updatedAt)}
-                    </time>
-                  </span>
-                  <strong>{s.title}</strong>
-                  <span className="preview">
-                    {s.messages.at(-1)?.text.slice(0, 100)}
-                  </span>
-                  <span className="message-count">
-                    {s.messages.length} 条消息 <span aria-hidden="true">→</span>
-                  </span>
-                </button>
+                      <label htmlFor="session-name">重命名会话</label>
+                      <input
+                        id="session-name"
+                        aria-label="会话名称"
+                        autoFocus
+                        required
+                        maxLength={100}
+                        value={editingTitle}
+                        onFocus={(e) => e.currentTarget.select()}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setEditingId(null);
+                            focusActions(s.id);
+                          }
+                        }}
+                      />
+                      <div>
+                        <button
+                          className="primary"
+                          type="submit"
+                          disabled={busy || !editingTitle.trim()}
+                        >
+                          保存名称
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(null);
+                            focusActions(s.id);
+                          }}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <button
+                        className="session"
+                        onClick={() => {
+                          listScroll.current = window.scrollY;
+                          setSelected(s.id);
+                        }}
+                      >
+                        <span className="session-meta">
+                          <span>{s.excluded ? "已停止保存" : "临时对话"}</span>
+                          <time
+                            dateTime={new Date(s.updatedAt).toISOString()}
+                            title={new Date(s.updatedAt).toLocaleString()}
+                          >
+                            {dateLabel(s.updatedAt)}
+                          </time>
+                        </span>
+                        <strong>{s.title}</strong>
+                        <span className="preview">
+                          {s.messages.at(-1)?.text.slice(0, 100)}
+                        </span>
+                        <span className="message-count">
+                          {s.messages.length} 条消息{" "}
+                          <span aria-hidden="true">→</span>
+                        </span>
+                      </button>
+                      <div className="session-actions">
+                        <button
+                          id={`session-actions-${s.id}`}
+                          className="more-trigger"
+                          aria-label={`会话操作：${s.title}`}
+                          aria-haspopup="menu"
+                          aria-expanded={menuId === s.id}
+                          aria-controls={`session-menu-${s.id}`}
+                          disabled={busy}
+                          onClick={() =>
+                            setMenuId(menuId === s.id ? null : s.id)
+                          }
+                        >
+                          ⋯
+                        </button>
+                        {menuId === s.id && (
+                          <div
+                            ref={menuRef}
+                            className="session-menu"
+                            id={`session-menu-${s.id}`}
+                            role="menu"
+                            aria-label="会话操作"
+                            onKeyDown={(e) => {
+                              if (
+                                ![
+                                  "ArrowDown",
+                                  "ArrowUp",
+                                  "Home",
+                                  "End",
+                                ].includes(e.key)
+                              )
+                                return;
+                              e.preventDefault();
+                              const items = [
+                                ...e.currentTarget.querySelectorAll<HTMLButtonElement>(
+                                  '[role="menuitem"]',
+                                ),
+                              ];
+                              const index = items.indexOf(
+                                document.activeElement as HTMLButtonElement,
+                              );
+                              items[
+                                e.key === "Home"
+                                  ? 0
+                                  : e.key === "End"
+                                    ? items.length - 1
+                                    : (index +
+                                        (e.key === "ArrowDown"
+                                          ? 1
+                                          : items.length - 1)) %
+                                      items.length
+                              ]?.focus();
+                            }}
+                          >
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                setMenuId(null);
+                                setEditingTitle(s.title);
+                                setEditingId(s.id);
+                              }}
+                            >
+                              重命名
+                            </button>
+                            <button
+                              role="menuitem"
+                              className="danger"
+                              onClick={() => deleteSession(s)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               ))
             ) : (
               <div className="empty">
