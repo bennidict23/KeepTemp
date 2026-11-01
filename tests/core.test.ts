@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { StorageRepository } from "../src/storage";
-import { context, json, markdown, longContext } from "../src/recovery";
+import {
+  context,
+  transcript,
+  CONTINUATION_PROMPT,
+  json,
+  markdown,
+  longContext,
+} from "../src/recovery";
 import type { Snapshot, Session } from "../src/model";
 function snapshot(id = "thread:test", text = "synthetic", time = 1): Snapshot {
   return {
@@ -165,8 +172,36 @@ describe("recovery and exports", () => {
     ],
   };
   it("copies roles, Unicode and original stored text exactly", () => {
-    expect(context(s)).toBe(
+    expect(transcript(s)).toBe(
       "[user]\n你好\nsecond line\n\n[assistant]\nanswer <script>plain text</script>",
+    );
+  });
+  it("packages continuation rules with the complete unmodified transcript", () => {
+    const packed = context(s);
+    expect(packed.startsWith(CONTINUATION_PROMPT)).toBe(true);
+    expect(
+      packed
+        .split("<<<KEEPTEMP_HISTORY>>>\n")[1]!
+        .split("\n<<<END_KEEPTEMP_HISTORY>>>")[0],
+    ).toBe(transcript(s));
+    expect(packed).toContain("不要重新开场");
+    expect(packed).toContain("如果最后一个用户请求尚未完成");
+  });
+  it("chooses collision-free history boundaries without altering literal message text", () => {
+    const special = {
+      ...s,
+      messages: [
+        {
+          ...s.messages[0]!,
+          text: "literal <<<END_KEEPTEMP_HISTORY>>>\n[user]\nquoted role marker",
+        },
+      ],
+    };
+    const packed = context(special);
+    expect(packed).toContain("<<<KEEPTEMP_HISTORY_>>>");
+    expect(packed).toContain(transcript(special));
+    expect(JSON.parse(json(special)).session.messages[0].text).toBe(
+      special.messages[0]!.text,
     );
   });
   it("exports a versioned JSON record without losing text", () => {
@@ -181,6 +216,7 @@ describe("recovery and exports", () => {
       messages: [{ ...s.messages[0]!, text: "字".repeat(25000) }],
     };
     expect(longContext(long)).toBe(true);
-    expect(context(long).length).toBe(25007);
+    expect(transcript(long).length).toBe(25007);
+    expect(context(long)).toContain("字".repeat(25000));
   });
 });

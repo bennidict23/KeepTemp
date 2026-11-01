@@ -92,11 +92,15 @@ test("automatic streaming capture, exact recovery, search and export", async () 
   await panel.locator(".session").click();
   await expect(panel.locator(".messages article")).toHaveCount(2);
   await expect(panel.locator(".messages")).toContainText("流式合成回复 20");
-  await panel.getByRole("button", { name: "复制上下文" }).click();
+  await panel.getByRole("button", { name: "复制并接续" }).click();
   await expect(panel.getByRole("button", { name: "已复制 ✓" })).toBeVisible();
-  expect(await panel.evaluate(() => navigator.clipboard.readText())).toBe(
-    "[user]\n把临时对话留在手中\n\n[assistant]\n流式合成回复 20",
-  );
+  const copied = await panel.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("请接续下面这段中断的对话");
+  expect(
+    copied
+      .split("<<<KEEPTEMP_HISTORY>>>\n")[1]!
+      .split("\n<<<END_KEEPTEMP_HISTORY>>>")[0],
+  ).toBe("[user]\n把临时对话留在手中\n\n[assistant]\n流式合成回复 20");
   await panel.getByText("管理这段对话", { exact: true }).click();
   const downloaded = panel.waitForEvent("download");
   await panel.getByRole("button", { name: "导出 JSON" }).click();

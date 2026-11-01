@@ -199,12 +199,12 @@ function App() {
                     await navigator.clipboard.writeText(context(current));
                     setCopied(true);
                   },
-                  "已复制上下文",
+                  "已复制历史与接续提示词。打开新临时会话，粘贴发送即可。",
                   "未能写入剪贴板，请检查浏览器权限后重试。",
                 )
               }
             >
-              {copied ? "已复制 ✓" : "复制上下文"}
+              {copied ? "已复制 ✓" : "复制并接续"}
             </button>
             <a
               className="button"
@@ -215,7 +215,7 @@ function App() {
               新临时会话 ↗
             </a>
           </div>
-          <small>复制后，在新会话粘贴并发送，即可接续文字上下文。</small>
+          <small>已包含完整历史与接续提示词。在新临时会话中粘贴并发送。</small>
           {longContext(current) && (
             <p className="notice">
               这段对话较长，可能超过所选模型的上下文容量。复制内容保持完整，不会自动截断。

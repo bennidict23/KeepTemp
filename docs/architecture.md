@@ -24,7 +24,7 @@ IndexedDB meta.consent 是本地授权，meta.chatgpt-consent 是网站自动捕
 
 Side Panel 读取扩展数据库，以本地轮询观察跨页提交；全文搜索覆盖标题与消息。选中会话不受搜索过滤结果影响，返回列表恢复滚动位置。React 纯文本插值展示记录，不执行保存内容。
 
-`RecoveryFormatter` 保留角色和文字，生成复制上下文、Markdown 与版本化 JSON 导出。复制由点击触发；不自动输入或发送消息。
+`RecoveryFormatter` 的 transcript 保留角色和原文字，context 在其外层附加固定接续提示词，并选用不会与正文冲突的边界。提示词要求新模型沿用目标、约束、结论和偏好，从未完成处继续，不重复开场或已完成回答。Markdown 与版本化 JSON 导出保持原记录，不附带提示词。复制由点击触发；不自动输入或发送消息。
 
 ## 权限与限制
 
