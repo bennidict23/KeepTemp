@@ -43,3 +43,17 @@ export function providerFixture(source: (typeof otherProviders)[number]) {
     html: `<!doctype html><html><head><meta charset="UTF-8"></head><body>${header}<main>${body}</main></body></html>`,
   };
 }
+
+export function genericFixture(id = "synthetic-thread", body = "") {
+  return `<!doctype html><html><head><meta charset="UTF-8"></head><body><main><section data-conversation-id="${id}">${body || genericTurn()}</section></main></body></html>`;
+}
+export function genericTurn(
+  id = "turn-1",
+  question = "通用合成问题",
+  answer = "通用合成回复",
+) {
+  return `<div data-message-id="${id}-u" data-message-author-role="user"><div data-message-content>${question}</div></div><div data-message-id="${id}-a" data-message-author-role="assistant"><div data-message-content><p data-stream>${answer}</p><p>保留第二段</p></div><button>复制</button></div>`;
+}
+export function deepseekFixture() {
+  return '<!doctype html><html><head><meta charset="UTF-8"></head><body><main><div data-virtual-list-item-key="10"><div class="ds-message">DeepSeek 合成问题</div></div><div data-virtual-list-item-key="11"><div class="ds-message"><div class="ds-markdown"><p data-stream>DeepSeek 合成回复</p><p>保留第二段</p></div><button>复制</button></div></div></main></body></html>';
+}

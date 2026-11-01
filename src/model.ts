@@ -10,7 +10,9 @@ export interface Message {
 }
 export interface Session {
   id: string;
-  source: "mock" | "manual" | PlatformId;
+  source: "mock" | "manual" | "generic" | PlatformId;
+  sourceOrigin?: string;
+  captureMode?: "explicit";
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -20,7 +22,9 @@ export interface Session {
   deleted?: boolean;
 }
 export interface Snapshot {
-  source?: "mock" | PlatformId;
+  source?: "mock" | "generic" | PlatformId;
+  sourceOrigin?: string;
+  captureMode?: "explicit";
   id: string;
   temporary: boolean | null;
   messages: Message[];

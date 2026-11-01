@@ -1,5 +1,6 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
+import type { Snapshot } from "../src/model";
 import { StorageRepository } from "../src/storage";
 import {
   validSnapshot,
@@ -21,34 +22,57 @@ export default defineBackground(() => {
         !request.type.startsWith("keeptemp:")
       )
         return;
-      // Only our top-frame content script on the exact supported origin may write.
+      // Top-frame scripts only; unknown HTTPS origins also require an explicit host grant below.
       if (
         sender.id !== browser.runtime.id ||
         sender.tab?.id === undefined ||
         sender.frameId !== 0 ||
         !sender.url ||
-        !platformFromUrl(sender.url)
+        !sender.url.startsWith("https://")
       ) {
         sendResponse({ ok: false, error: "invalid-source" });
         return false;
       }
       const tabId = sender.tab.id;
-      const platform = platformFromUrl(sender.url)!.id;
+      const origin = new URL(sender.url).origin;
+      const platform = platformFromUrl(sender.url)?.id ?? "generic";
+      const generic = platform === "generic";
+      const scope = (id: string) => scopedChatId(tabId, id, platform, origin);
       const data = request as Record<string, unknown>;
       // Keep the channel alive on Chrome versions without Promise-returning listeners.
       void (async (): Promise<BridgeResponse> => {
         try {
+          if (
+            generic &&
+            !(await browser.permissions.contains({ origins: [origin + "/*"] }))
+          )
+            return { ok: false, error: "invalid-source" };
+          const rawId =
+            typeof data.id === "string" &&
+            data.id.startsWith("thread:") &&
+            data.id.length <= 600
+              ? data.id
+              : null;
+          const localConsent = await repo.consent();
           const consent =
-            (await repo.consent()) && (await repo.autoCapture(platform));
+            localConsent &&
+            (generic
+              ? rawId
+                ? await repo.genericAllowed(scope(rawId))
+                : true
+              : await repo.autoCapture(platform));
           if (data.type === "keeptemp:start-current") {
             if (!(await repo.consent()))
               return { ok: false, error: "consent-required" };
-            if (!validSnapshot(data.snapshot))
+            if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
-            const snapshot = {
+            const snapshot: Snapshot = {
               ...data.snapshot,
-              id: scopedChatId(tabId, data.snapshot.id, platform),
+              id: scope(data.snapshot.id),
               source: platform,
+              ...(generic
+                ? { sourceOrigin: origin, captureMode: "explicit" as const }
+                : {}),
             };
             const saved = await repo.capture(snapshot, true);
             if (!saved) {
@@ -64,15 +88,28 @@ export default defineBackground(() => {
             }
             return { ok: true, consent: true, saved: true };
           }
-          if (!consent) return { ok: true, consent: false, saved: false };
+          if (generic && data.type === "keeptemp:state") {
+            const session = rawId ? await repo.get(scope(rawId)) : undefined;
+            return {
+              ok: true,
+              consent,
+              paused: session?.paused ?? false,
+              excluded: Boolean(session?.excluded || session?.deleted),
+            };
+          }
+          if (!consent && !generic)
+            return { ok: true, consent: false, saved: false };
           if (data.type === "keeptemp:capture") {
-            if (!validSnapshot(data.snapshot))
+            if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
             const snapshot = data.snapshot;
             const saved = await repo.capture({
               ...snapshot,
-              id: scopedChatId(tabId, snapshot.id, platform),
+              id: scope(snapshot.id),
               source: platform,
+              ...(generic
+                ? { sourceOrigin: origin, captureMode: "explicit" as const }
+                : {}),
             });
             return { ok: true, consent: true, saved };
           }
@@ -80,7 +117,7 @@ export default defineBackground(() => {
             typeof data.id === "string" &&
             data.id.startsWith("thread:") &&
             data.id.length <= 600
-              ? scopedChatId(tabId, data.id, platform)
+              ? scope(data.id)
               : null;
           if (data.type === "keeptemp:exclude" && id) await repo.delete(id); // content-free permanent exclusion, including before first write
           if (

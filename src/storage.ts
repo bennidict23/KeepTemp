@@ -27,7 +27,10 @@ export class StorageRepository {
   async autoCapture(source?: PlatformId) {
     const db = await this.db;
     if (source) return Boolean(await db.get("meta", captureKey(source)));
-    return (await this.enabledPlatforms()).length > 0;
+    return (
+      (await this.enabledPlatforms()).length > 0 ||
+      (await this.genericCount()) > 0
+    );
   }
   async enabledPlatforms() {
     const db = await this.db;
@@ -36,12 +39,24 @@ export class StorageRepository {
     );
     return PLATFORMS.filter((_p, i) => values[i]).map((p) => p.id);
   }
+  async genericCount() {
+    const db = await this.db;
+    const keys = await db.getAllKeys("meta");
+    return keys.filter((k) => k.startsWith("generic-grant:")).length;
+  }
+  async genericAllowed(id: string) {
+    return Boolean(await (await this.db).get("meta", `generic-grant:${id}`));
+  }
   async setAutoCapture(enabled: boolean, source?: PlatformId) {
     const db = await this.db;
     const tx = db.transaction("meta", "readwrite");
     for (const p of PLATFORMS)
       if (!source || p.id === source)
         await tx.store.put(enabled, captureKey(p.id));
+    if (!enabled && !source) {
+      for (const key of await tx.store.getAllKeys())
+        if (key.startsWith("generic-grant:")) await tx.store.delete(key);
+    }
     await tx.done;
   }
   async authorize() {
@@ -64,7 +79,26 @@ export class StorageRepository {
     return (await this.db).get("sessions", id);
   }
   async capture(snapshot: Snapshot, enableCapture = false) {
-    if (snapshot.temporary !== true || !snapshot.messages.length) return false;
+    const generic = snapshot.source === "generic";
+    if (
+      !snapshot.messages.length ||
+      (generic
+        ? snapshot.captureMode !== "explicit"
+        : snapshot.temporary !== true)
+    )
+      return false;
+    if (generic) {
+      try {
+        const origin = new URL(snapshot.sourceOrigin!);
+        if (
+          origin.protocol !== "https:" ||
+          origin.origin !== snapshot.sourceOrigin
+        )
+          return false;
+      } catch {
+        return false;
+      }
+    }
     const db = await this.db;
     const tx = db.transaction(["sessions", "meta"], "readwrite");
     try {
@@ -80,6 +114,14 @@ export class StorageRepository {
         await tx.done;
         return false;
       }
+      if (
+        generic &&
+        !enableCapture &&
+        !(await tx.objectStore("meta").get(`generic-grant:${snapshot.id}`))
+      ) {
+        await tx.done;
+        return false;
+      }
       const store = tx.objectStore("sessions");
       const old = await store.get(snapshot.id);
       if (old?.excluded || old?.deleted || old?.paused) {
@@ -88,6 +130,8 @@ export class StorageRepository {
       }
       if (enableCapture && isPlatform(snapshot.source))
         await tx.objectStore("meta").put(true, captureKey(snapshot.source));
+      if (generic && enableCapture)
+        await tx.objectStore("meta").put(true, `generic-grant:${snapshot.id}`);
       const messages = new Map(old?.messages.map((m) => [m.id, m]));
       const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
       const ordered = [...messages.values()]
@@ -119,6 +163,12 @@ export class StorageRepository {
       await store.put({
         id: snapshot.id,
         source: snapshot.source ?? "mock",
+        ...(generic
+          ? {
+              sourceOrigin: snapshot.sourceOrigin,
+              captureMode: "explicit" as const,
+            }
+          : {}),
         title:
           old?.title ??
           (all[0]?.text.slice(0, 70) ||
@@ -178,8 +228,9 @@ export class StorageRepository {
   }
   async delete(id: string) {
     const db = await this.db;
-    const tx = db.transaction("sessions", "readwrite");
-    await tx.store.put({
+    const tx = db.transaction(["sessions", "meta"], "readwrite");
+    await tx.objectStore("meta").delete(`generic-grant:${id}`);
+    await tx.objectStore("sessions").put({
       id,
       source: "mock",
       title: "",

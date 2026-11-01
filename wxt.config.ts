@@ -4,7 +4,8 @@ export default defineConfig({
   manifest: {
     name: "KeepTemp",
     description: "Keep a local copy. Continue on your terms.",
-    permissions: ["sidePanel", "scripting"],
+    permissions: ["sidePanel", "scripting", "activeTab"],
+    optional_host_permissions: ["https://*/*"],
     host_permissions: [
       "https://chatgpt.com/*",
       "https://claude.ai/*",

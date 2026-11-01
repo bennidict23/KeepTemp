@@ -14,14 +14,23 @@ export interface BridgeResponse {
   excluded?: boolean;
   error?: string;
 }
-export function validSnapshot(value: unknown): value is Snapshot {
+export function validSnapshot(
+  value: unknown,
+  allowExplicit = false,
+): value is Snapshot {
   if (!value || typeof value !== "object") return false;
   const s = value as Snapshot;
   if (
     typeof s.id !== "string" ||
     s.id.length > 600 ||
     !s.id.startsWith("thread:") ||
-    s.temporary !== true ||
+    !(
+      s.temporary === true ||
+      (allowExplicit &&
+        s.source === "generic" &&
+        s.captureMode === "explicit" &&
+        (s.temporary === null || typeof s.temporary === "boolean"))
+    ) ||
     !Array.isArray(s.messages) ||
     !s.messages.length ||
     s.messages.length > 10000
@@ -51,7 +60,10 @@ export function validSnapshot(value: unknown): value is Snapshot {
 export function scopedChatId(
   tabId: number,
   id: string,
-  source: PlatformId = "chatgpt",
+  source: PlatformId | "generic" = "chatgpt",
+  origin = "",
 ) {
-  return `${source}:${tabId}:${id}`;
+  return source === "generic"
+    ? `generic:${encodeURIComponent(origin)}:${tabId}:${id}`
+    : `${source}:${tabId}:${id}`;
 }

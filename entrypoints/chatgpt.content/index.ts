@@ -54,13 +54,29 @@ export default defineContentScript({
       controls.hidden = !consent || !id || excluded;
       return r;
     };
-    pause.onclick = async () => {
-      if (busy || !activeId) return;
+    const acquireAction = async (button: HTMLButtonElement, id: string) => {
+      button.disabled = true;
+      for (let i = 0; busy && ctx.isValid && i < 120; i++)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      if (busy || !ctx.isValid || activeId !== id) {
+        button.disabled = false;
+        return false;
+      }
       busy = true;
+      return true;
+    };
+    pause.onclick = async () => {
+      const id = activeId;
+      if (!id) return;
+      if (!(await acquireAction(pause, id))) {
+        say("设置未完成，请重试");
+        return;
+      }
       try {
+        await state(id);
         const r = await send({
           type: "keeptemp:pause",
-          id: activeId,
+          id,
           paused: !paused,
         });
         if (!r.ok) throw Error();
@@ -71,14 +87,19 @@ export default defineContentScript({
         say("设置失败，请重试");
       } finally {
         busy = false;
+        pause.disabled = false;
       }
     };
     exclude.onclick = async () => {
-      if (busy || !activeId) return;
+      const id = activeId;
+      if (!id) return;
       if (!confirm("排除此会话并删除其本地副本？后续不再保存。")) return;
-      busy = true;
+      if (!(await acquireAction(exclude, id))) {
+        say("设置未完成，请重试");
+        return;
+      }
       try {
-        const r = await send({ type: "keeptemp:exclude", id: activeId });
+        const r = await send({ type: "keeptemp:exclude", id });
         if (!r.ok) throw Error();
         await state(activeId);
         lastSaved = "";
@@ -87,6 +108,7 @@ export default defineContentScript({
         say("排除失败，请重试");
       } finally {
         busy = false;
+        exclude.disabled = false;
       }
     };
     const expand = shadow.querySelector<HTMLButtonElement>("#expand")!;

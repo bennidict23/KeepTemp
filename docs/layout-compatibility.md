@@ -23,3 +23,11 @@
 Grok #private 入口参考 [作者维护的 private-by-default 脚本](https://github.com/nisc/grok-userscripts/blob/main/grok-private-by-default.user.js)；只使用 URL 线索，不复制自动点击、私有请求或其他行为。Claude 控件标记参考 [Incognito by Default 内容脚本](https://github.com/generativelabs/claude-incognito-by-default/blob/main/content.js)，不自动点击切换。
 
 没有稳定会话 URL 的临时页面按原生消息锚定。完全没有共同锚点时拆分；根地址刷新或从无会话 ID 的根地址跳到原生会话 URL 时可能拆分。不自动滚动补抓被卸载内容。真实账号验收要分别核对模式识别、角色、流式更新、刷新、SPA 新会话和多标签，不能仅以合成测试通过宣布支持所有布局。
+
+## 0.5.0 通用引擎与 DeepSeek
+
+GenericChatAdapter 不列厂商名单，要求可见主区中的明确 user／assistant（或 human／model）角色、原生消息 ID 及共同会话身份；没有共同会话容器时要求高唯一性原生锚点。data-index、扫描位置、正文哈希均不作为通用消息 ID。缺少稳定身份或多个活动区域／重复键时拒绝。
+
+DeepSeek 仅 chat.deepseek.com 的实验分支参考 [作者的 DOM 实现](https://openuserjs.org/scripts/FastNow/DeepSeekExporter/source)：ds-message 内有 ds-markdown 时识别为助手，否则用户；优先明确角色，存在冲突则拒绝。原生 /a/chat/s/<id> 范围内可使用 data-virtual-list-item-key，未确定会话或缺键则拒绝。没有检查私人账号，没有获取 Token、请求接口或自动滚动。该推断依赖布局，预览需用户核对，不能以合成测试证明真实角色稳定。
+
+通用模式不判断平台是否真的临时，记录始终标注“主动记录，网站历史可能存在”。已有四家临时自动捕获不放宽此判断。刷新可恢复同一批准会话；路由变化，即使原生会话键相同也要求再次确认，宁可分段而不沿用到新会话。

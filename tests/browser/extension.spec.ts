@@ -8,11 +8,36 @@ import {
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { shell, turn, otherProviders, providerFixture } from "../fixtures";
+import {
+  shell,
+  turn,
+  otherProviders,
+  providerFixture,
+  genericFixture,
+  genericTurn,
+  deepseekFixture,
+} from "../fixtures";
 let browser: BrowserContext, base: string, profile: string, panel: Page;
 test.beforeAll(async () => {
   profile = await fs.mkdtemp(path.join(os.tmpdir(), "keeptemp-"));
-  const extension = path.resolve(".output/chrome-mv3");
+  const extension = path.join(profile, "extension");
+  await fs.cp(path.resolve(".output/chrome-mv3"), extension, {
+    recursive: true,
+  });
+  // Test-only required hosts emulate grants in an isolated profile. Shipping
+  // manifest still declares these as optional; native permission prompts need manual QA.
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(extension, "manifest.json"), "utf8"),
+  );
+  manifest.host_permissions.push(
+    "https://synthetic-chat.example/*",
+    "https://synthetic-other.example/*",
+    "https://chat.deepseek.com/*",
+  );
+  await fs.writeFile(
+    path.join(extension, "manifest.json"),
+    JSON.stringify(manifest),
+  );
   browser = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: true,
@@ -79,6 +104,12 @@ test.afterEach(async () => {
   await browser.unroute("https://chatgpt.com/**");
   for (const source of otherProviders)
     await browser.unroute(providerFixture(source).origin + "/**");
+  for (const origin of [
+    "https://synthetic-chat.example",
+    "https://synthetic-other.example",
+    "https://chat.deepseek.com",
+  ])
+    await browser.unroute(origin + "/**");
 });
 test.afterAll(async () => {
   await browser?.close();
@@ -303,13 +334,15 @@ test("minimal library fits narrow light and dark panels without development tool
   const manifest = JSON.parse(
     await fs.readFile(".output/chrome-mv3/manifest.json", "utf8"),
   );
-  expect(manifest.permissions).toEqual(["sidePanel", "scripting"]);
+  expect(manifest.permissions).toEqual(["sidePanel", "scripting", "activeTab"]);
   expect(manifest.host_permissions).toEqual([
     "https://chatgpt.com/*",
     "https://claude.ai/*",
     "https://grok.com/*",
     "https://gemini.google.com/*",
   ]);
+  expect(manifest.optional_host_permissions).toEqual(["https://*/*"]);
+  expect(manifest.content_scripts).toHaveLength(1);
   expect([...manifest.content_scripts[0].matches].sort()).toEqual(
     [...manifest.host_permissions].sort(),
   );
@@ -383,7 +416,7 @@ test("starts recording a conversation opened independently and already in progre
   await expect(panel.locator(".session")).toHaveCount(0);
   await p.bringToFront();
   await panel
-    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
   await expect(panel.getByRole("status")).toContainText(
     "已保存当前可读取的内容",
@@ -399,7 +432,7 @@ test("starts recording a conversation opened independently and already in progre
   expect(p.url()).toBe("https://chatgpt.com/c/mid-session-synthetic");
   await p.bringToFront();
   await panel
-    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
   await expect(panel.getByRole("status")).toContainText(
     "已保存当前可读取的内容",
@@ -451,7 +484,7 @@ test("hot-attaches when the old content script is absent without reloading the c
   await expect(p.locator("#keeptemp-status")).toHaveCount(0);
   await p.bringToFront();
   await panel
-    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
   await expect(panel.getByRole("status")).toContainText(
     "已保存当前可读取的内容",
@@ -607,7 +640,7 @@ test("recording the current Claude chat only enables Claude and preserves the ex
   );
   await p.bringToFront();
   await panel
-    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
   await expect(panel.getByRole("status")).toContainText(
     "已保存当前可读取的内容",
@@ -628,4 +661,216 @@ test("recording the current Claude chat only enables Claude and preserves the ex
     second.locator("#keeptemp-status").getByRole("status"),
   ).toContainText("尚未授权");
   await expect(panel.locator(".session")).toHaveCount(1);
+});
+
+async function genericChat(
+  origin = "https://synthetic-chat.example",
+  html = genericFixture(),
+  routePath = "/chat/first",
+) {
+  await browser.route(origin + "/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: html }),
+  );
+  const p = await browser.newPage();
+  await p.goto(origin + routePath);
+  return p;
+}
+async function previewPage(p: Page) {
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前对话", exact: true })
+    .click();
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toBeVisible();
+}
+async function confirmPage(p: Page) {
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "确认并记录此对话", exact: true })
+    .click();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+}
+test("generic preview is memory-only; explicit confirmation streams and resumes the same chat after reload", async () => {
+  const p = await genericChat();
+  await previewPage(p);
+  await expect(panel.locator(".preview-messages article")).toHaveCount(2);
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
+    "网站里的历史可能仍存在",
+  );
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await panel.getByRole("button", { name: "关闭预览" }).click();
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await previewPage(p);
+  await panel.setViewportSize({ width: 340, height: 900 });
+  await panel.screenshot({ path: "docs/generic-preview.png", fullPage: true });
+  await confirmPage(p);
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText(
+    "synthetic-chat.example",
+  );
+  await p.evaluate(async () => {
+    for (let i = 0; i < 30; i++) {
+      document.querySelector("[data-stream]")!.textContent = "通用流式 " + i;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+  });
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText("通用流式 29");
+  await expect(
+    panel.getByText("这是你主动记录的网页对话。", { exact: false }),
+  ).toBeVisible();
+  await p.reload();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await p.evaluate(
+    () => (document.querySelector("[data-stream]")!.textContent = "刷新后继续"),
+  );
+  await expect(panel.locator(".messages")).toContainText("刷新后继续");
+  await p.close();
+  await panel.reload();
+  await expect(panel.locator(".session")).toHaveCount(1);
+});
+
+test("generic SPA navigation invalidates previews and requires fresh approval for a new conversation", async () => {
+  const p = await genericChat();
+  await previewPage(p);
+  await p.evaluate(() => history.pushState(null, "", "/chat/second"));
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "确认并记录此对话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText("预览已失效");
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await previewPage(p);
+  await confirmPage(p);
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await p.evaluate(
+    (html) => {
+      history.pushState(null, "", "/chat/third");
+      document.querySelector("main")!.innerHTML = html;
+    },
+    '<section data-conversation-id="third">' +
+      genericTurn("third", "新的合成问题", "新的合成回答") +
+      "</section>",
+  );
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "已切换会话",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await previewPage(p);
+  await confirmPage(p);
+  await expect(panel.locator(".session")).toHaveCount(2);
+});
+
+test("generic origin and tab scopes stay independent, and deleted records cannot come back", async () => {
+  const first = await genericChat();
+  await previewPage(first);
+  await confirmPage(first);
+  const second = await genericChat("https://synthetic-other.example");
+  await previewPage(second);
+  await confirmPage(second);
+  await expect(panel.locator(".session")).toHaveCount(2);
+  const third = await browser.newPage();
+  await third.goto("https://synthetic-other.example/chat/first");
+  await previewPage(third);
+  await confirmPage(third);
+  await expect(panel.locator(".session")).toHaveCount(3);
+  await panel
+    .locator(".session")
+    .filter({ hasText: "synthetic-chat.example" })
+    .click();
+  panel.once("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "删除会话", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(2);
+  await expect(
+    first.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("已排除");
+  await first.evaluate(
+    () =>
+      (document.querySelector("[data-stream]")!.textContent =
+        "deleted text must not resurrect"),
+  );
+  await clear();
+  await expect(
+    second.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("已关闭");
+  await panel.reload();
+  await expect(
+    panel.getByRole("button", { name: "我了解并同意本地保存" }),
+  ).toBeVisible();
+});
+
+test("generic write failure does not claim Saved or leave an automatic grant", async () => {
+  const p = await genericChat();
+  await previewPage(p);
+  const worker = browser.serviceWorkers()[0]!;
+  await worker.evaluate(() => {
+    const proto =
+      IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
+        originalPut?: typeof IDBObjectStore.prototype.put;
+      };
+    proto.originalPut = proto.put;
+    proto.put = function (...args) {
+      if (this.name === "sessions")
+        throw new DOMException("synthetic", "QuotaExceededError");
+      return proto.originalPut!.apply(this, args);
+    };
+  });
+  try {
+    await p.bringToFront();
+    await panel
+      .getByRole("button", { name: "确认并记录此对话", exact: true })
+      .click();
+    await expect(panel.getByRole("status")).toContainText("暂未保存成功");
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText("保存失败");
+    await expect(panel.locator(".session")).toHaveCount(0);
+    await expect(panel.locator(".capture-strip strong")).toHaveText(
+      "自动保存尚未开启",
+    );
+  } finally {
+    await worker.evaluate(() => {
+      const proto =
+        IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
+          originalPut?: typeof IDBObjectStore.prototype.put;
+        };
+      proto.put = proto.originalPut!;
+      delete proto.originalPut;
+    });
+  }
+  await confirmPage(p);
+  await expect(panel.locator(".session")).toHaveCount(1);
+});
+
+test("DeepSeek synthetic native items can be explicitly recorded without claiming temporary privacy", async () => {
+  const p = await genericChat(
+    "https://chat.deepseek.com",
+    deepseekFixture(),
+    "/a/chat/s/synthetic-deepseek",
+  );
+  await previewPage(p);
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
+    "不代表已开启临时模式",
+  );
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await confirmPage(p);
+  await panel.locator(".session").click();
+  await expect(panel.locator(".meta")).toContainText("chat.deepseek.com");
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText("DeepSeek 合成回复");
+  await p.evaluate(
+    () =>
+      (document.querySelector("[data-stream]")!.textContent =
+        "DeepSeek 增量回复"),
+  );
+  await expect(panel.locator(".messages")).toContainText("DeepSeek 增量回复");
+  await panel.getByRole("button", { name: "复制并接续" }).click();
+  const copied = await panel.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("[assistant]\nDeepSeek 增量回复\n保留第二段");
+  expect(copied).not.toContain("chat.deepseek.com");
 });

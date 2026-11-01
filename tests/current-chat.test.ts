@@ -2,11 +2,18 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { PLATFORMS } from "../src/platforms";
 const api = vi.hoisted(() => ({
   tabs: { query: vi.fn(), sendMessage: vi.fn() },
-  scripting: { executeScript: vi.fn() },
+  permissions: { request: vi.fn() },
+  scripting: {
+    executeScript: vi.fn(),
+    getRegisteredContentScripts: vi.fn(),
+    registerContentScripts: vi.fn(),
+  },
 }));
 vi.mock("wxt/browser", () => ({ browser: api }));
 import {
   recordCurrentChat,
+  prepareCurrentChat,
+  confirmGeneric,
   CurrentChatError,
   currentChatError,
 } from "../src/current-chat";
@@ -22,6 +29,9 @@ beforeEach(() => {
         : { ok: true },
   );
   api.scripting.executeScript.mockResolvedValue([]);
+  api.permissions.request.mockResolvedValue(true);
+  api.scripting.getRegisteredContentScripts.mockResolvedValue([]);
+  api.scripting.registerContentScripts.mockResolvedValue(undefined);
 });
 const repo = () => ({ consent: vi.fn().mockResolvedValue(true) });
 describe("start recording an existing chat", () => {
@@ -128,5 +138,72 @@ describe("start recording an existing chat", () => {
     expect(caught).toBeInstanceOf(CurrentChatError);
     expect(currentChatError(caught)).toContain("允许访问当前平台的网站");
     expect(currentChatError(caught)).not.toContain("private");
+  });
+});
+
+const preview = {
+  origin: "https://synthetic-chat.example",
+  tabId: 17,
+  token: "preview-token",
+  id: "thread:native",
+  reason: "ready" as const,
+  method: "semantic" as const,
+  messages: [],
+};
+describe("generic preview and explicit grants", () => {
+  it("previews an unlisted HTTPS origin without saving or requesting persistent access", async () => {
+    api.tabs.query.mockResolvedValue([
+      { id: 17, url: preview.origin + "/chat" },
+    ]);
+    api.tabs.sendMessage.mockImplementation(
+      async (_id: number, r: { type: string }) =>
+        r.type === "keeptemp:generic-preview"
+          ? { ok: true, preview }
+          : { ok: true },
+    );
+    expect(await prepareCurrentChat(repo())).toMatchObject(preview);
+    expect(api.permissions.request).not.toHaveBeenCalled();
+    expect(
+      api.tabs.sendMessage.mock.calls.some((c) => c[1].type.includes("record")),
+    ).toBe(false);
+  });
+  it("does not read tabs before local consent or inject into restricted/shared pages", async () => {
+    await expect(
+      prepareCurrentChat({ consent: async () => false }),
+    ).rejects.toMatchObject({ code: "consent-required" });
+    expect(api.tabs.query).not.toHaveBeenCalled();
+    for (const url of [
+      "chrome://settings",
+      "http://synthetic-chat.example",
+      "https://synthetic-chat.example/share/a",
+    ]) {
+      api.tabs.query.mockResolvedValue([{ id: 17, url }]);
+      await expect(prepareCurrentChat(repo())).rejects.toMatchObject({
+        code: "not-chatgpt",
+      });
+    }
+    expect(api.scripting.executeScript).not.toHaveBeenCalled();
+  });
+  it("denied host permission never starts a capture", async () => {
+    api.permissions.request.mockResolvedValue(false);
+    await expect(confirmGeneric(preview)).rejects.toMatchObject({
+      code: "permission-denied",
+    });
+    expect(api.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(api.scripting.registerContentScripts).not.toHaveBeenCalled();
+  });
+  it("rejects a switched tab and reports an expired preview", async () => {
+    await expect(confirmGeneric(preview)).rejects.toMatchObject({
+      code: "preview-expired",
+    });
+    expect(api.tabs.sendMessage).not.toHaveBeenCalled();
+    api.tabs.query.mockResolvedValue([{ id: 17, url: preview.origin }]);
+    api.tabs.sendMessage.mockResolvedValue({
+      ok: false,
+      error: "preview-expired",
+    });
+    await expect(confirmGeneric(preview)).rejects.toMatchObject({
+      code: "preview-expired",
+    });
   });
 });

@@ -37,3 +37,15 @@
 新增权限仅为三个精确 HTTPS 站点，仍无 cookies、请求拦截、凭据访问或平台 API。原 ChatGPT 授权保留；升级不会自动开启其他平台。主页总开关明确开启四家，主动记录仅开启当前平台。Claude／Gemini 新会话入口不自动保证隐私模式，界面要求用户发送前确认。
 
 工程判断：跨平台文字接续可直接实现；自动保存取决于模式信号、稳定消息身份和挂载范围。Claude 根地址只有虚拟行号时不保存；无共同原生锚点时拆分而非冒险混淆。更多布局依据见 [页面布局记录](layout-compatibility.md)。
+
+## 0.5.0：通用保存与 DeepSeek 的明确结果
+
+用户将“保存”置于接续之前，并明确授权：普通或模式未知的网页对话也可在主动确认后保存，但必须提醒网站里的历史仍存在。这是对原“仅临时”边界的明确产品变更；四家原临时自动捕获仍严格判断。
+
+[DeepSeek 官方隐私政策](https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html)（页内更新 2026-02-10）描述输入、输出与聊天历史处理；本次未从官方资料确认原生 Temporary／Incognito 模式。未登录账号验证，不能因此断言所有账号都没有该功能，更不能把另存本地宣称为平台历史隐藏。[DeepSeek 使用条款](https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html)（页内更新 2026-03-27）也不构成本扩展采集授权。
+
+公开作者的 [DeepSeekExporter DOM 源码](https://openuserjs.org/scripts/FastNow/DeepSeekExporter/source) 提供 ds-message、ds-markdown、virtual-list-item-key 及 /a/chat/s/ 路径参考。只参考这些网页结构线索，不采用该工具的凭据访问、私有 API、网络拦截或自动滚动路径。合成页面验证了 DOM 捕获闭环，真实布局与 native item key 的长期稳定性仍待用户验收。
+
+通用技术边界：可以针对带明确角色与稳定身份的未列出网站复用引擎；无法保证任意网站无需规则即可提取。没有可靠结构时明确拒绝，不把导入或逐轮复制作为核心替代，也不把通用原型宣传成全面支持。
+
+权限参考：[activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab) 在用户调用扩展后授予当前页临时访问；[permissions.request](https://developer.chrome.com/docs/extensions/reference/api/permissions#method-request) 允许在用户操作时请求可选范围的子集。实现将全 HTTPS 范围仅声明为 optional，确认时只请求当前 origin，不默认读取所有网站。Chrome 原生授权弹窗需用户实际验收；浏览器自动化以隔离测试副本中的合成站点权限模拟已授予状态，不能用此宣称弹窗已实测通过。

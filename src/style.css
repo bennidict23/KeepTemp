@@ -636,3 +636,37 @@ summary {
   text-align: center;
   font-size: 10px;
 }
+.capture-preview {
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preview-heading h3 {
+  margin: 0;
+}
+.preview-heading button {
+  padding: 4px 10px;
+}
+.preview-messages {
+  max-height: 320px;
+  overflow: auto;
+  margin: 14px 0;
+  border-block: 1px solid var(--line);
+}
+.preview-messages article {
+  padding: 12px 0;
+}
+.preview-messages article + article {
+  border-top: 1px solid var(--line);
+}
+.preview-messages p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
