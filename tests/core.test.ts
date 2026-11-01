@@ -106,7 +106,10 @@ describe("durable local capture", () => {
     await r.delete("thread:test");
     expect(await r.list()).toEqual([]);
     expect(await r.capture(snapshot())).toBe(false);
-    expect((await r.get("thread:test"))?.messages).toEqual([]);
+    const deleted = await r.get("thread:test");
+    expect(deleted?.messages).toEqual([]);
+    expect(deleted?.title).toBe("");
+    expect(JSON.stringify(deleted)).not.toContain("synthetic");
   });
   it("clears records and all consent atomically with queued writes", async () => {
     const r = await repo();
