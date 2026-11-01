@@ -1,9 +1,5 @@
 import type { PlatformAdapter, Snapshot, Message } from "./model";
-// No ChatGPT selector, host access, or runtime enable switch exists in this build.
-export const chatGPTCapability = {
-  enabled: false,
-  reason: "Programmatic extraction permission not established",
-} as const;
+export const chatGPTCapability = { enabled: true, experimental: true } as const;
 export class MockAdapter implements PlatformAdapter {
   readonly source = "mock" as const;
   constructor(

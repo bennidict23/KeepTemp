@@ -1,43 +1,42 @@
 # KeepTemp
 
-**项目状态：技术验证原型，尚未实现核心产品目标。**
+本地保存 ChatGPT Temporary Chat 的 Chrome 扩展。**0.2.0 已接入真实页面 DOM 自动捕获，处于实验阶段；尚未用真实 ChatGPT 账号验收。** 不再要求逐轮手动复制粘贴。
 
-目标是在 ChatGPT Temporary Chat 中照常聊天并自动保存本地副本。目前尚未找到已确认获准、符合原约束的真实平台捕获路径。现有手动导入不构成目标完成，也不作为值得继续扩展的独立产品方案。详见 [自动保存可行性复核](docs/automatic-capture-review.md)。
+## 更新及开始使用
 
-**此版本：主动粘贴 / JSON 导入 + 本地会话库 + 合成页面自动捕获。ChatGPT 自动采集未启用。** 当前条款禁止程序化提取，不能把 DOM 技术可行性当成公开发布许可。参见 [可行性研究](docs/feasibility.md)。
+本次已构建：`path/to/KeepTemp/.output/chrome-mv3`。
 
-## 本地安装
+1. 打开 `chrome://extensions`，找到 KeepTemp，点击刷新图标。版本应显示 **0.2.0**；若 Chrome 提示确认 chatgpt.com 网站访问权限，需允许该站点访问。
+2. 打开 KeepTemp Side Panel。首次用户先阅读隐私说明、同意本地保存；已授权旧版的用户无需清空已有数据。
+3. 点击 **启用 ChatGPT 自动保存**。这是独立授权，旧版手动保存授权不会自动开启网站捕获。
+4. 刷新已打开的 ChatGPT 网页，使新版内容脚本加载。打开 Temporary Chat，或点击面板的“打开 ChatGPT 临时聊天”入口（`https://chatgpt.com/?temporary-chat=true`）。请确认网页本身显示 Temporary。
+5. 正常聊一轮。页面右下角出现 **KeepTemp · Saved · 已保存到本地** 后，回到 Side Panel 查看。无需粘贴、整理角色或逐轮点击保存。
+6. 右下角可以暂停和排除此会话。暂停后恢复会保存当前仍可见的文字；“排除”会删除本地副本并阻止该段会话再次保存。全局停止使用面板的“关闭 ChatGPT 自动保存”。
 
-需要 Node.js 22.12+ 和 Chrome 116+。本次 Mac 开发环境的独立 Node 路径：
+初次安装：在 `chrome://extensions` 启用开发者模式，加载已解压扩展，选择上述目录。macOS 隐藏 `.output`，文件选择窗口按 Cmd+Shift+G 粘贴完整路径。
+
+## 捕获与恢复边界
+
+- 仅在 `https://chatgpt.com/*` 注入内容脚本。读取可见 user/assistant 文字，按稳定消息标记更新；写入扩展 origin IndexedDB，由后台确认事务成功才显示 Saved。
+- Temporary 信号来自明确激活控件、状态标记或 `temporary-chat=true` URL；明确关闭状态优先于 URL。普通、未知模式或缺乏稳定首条用户消息身份时默认不保存。此启发识别尚未在真实账号验证，不能承诺覆盖所有界面版本。
+- 页面结构变化可能导致无法识别。右下角一直“等待可识别的 Temporary 对话”时，请反馈状态文字和你使用的语言，不需要提供私人对话。
+- 只保存当时存在于页面 DOM 的文字，不补抓未加载历史、不提取隐藏推理、不保存附件或工具状态。消息文本的布局空白会规范化，不是原始 HTML 归档。
+- 刷新后使用首条用户消息的原生 id 继续归档；从 `/` 跳到 `/c/...` 不拆会话。不同 tab 的记录保持独立；不自动跨标签页合并。浏览器重启后 tab id 变化可能产生另一份记录。
+- 未确认写入的末尾内容可能在马上关闭标签页时丢失。编辑、重新生成和切换分支按当前可见消息更新，不提供分支版本历史。
+- 恢复：在 Side Panel 点击复制上下文，自己打开新 ChatGPT 会话、选择 Temporary 并粘贴发送。不自动输入或发送，不恢复原服务端会话。
+
+本地数据库未加密，不是密码保险库；导出备份由用户决定。删除本地记录不改变平台端保留，也不删除导出文件。无服务器、API Key、凭据提取、网络拦截或分析 SDK。
+
+此开发版按用户最新要求启用真实捕获；没有获得 OpenAI 对自动提取的许可，也未上架商店。相关已知风险见 [可行性记录](docs/feasibility.md)，不把技术可运行等同于平台许可。
+
+## 开发
+
+Node.js 22.12+，Chrome 116+。此 Mac 的独立 Node 路径：
 
 ```sh
 export PATH="$HOME/.local/keeptemp-tools/node:$PATH"
 cd path/to/KeepTemp
 npm ci
-npm run build
-```
-
-1. 打开 `chrome://extensions`，启用开发者模式。
-2. 选择“加载已解压的扩展程序”，目录 `path/to/KeepTemp/.output/chrome-mv3`。文件选择器可按 Cmd+Shift+G 输入路径。
-3. 点击扩展工具栏中的 KeepTemp 图标打开 Side Panel，阅读说明并授权。
-4. 点击“粘贴或导入对话”，使用下面格式，保存后即可搜索、查看、导出和复制。
-5. 合成验证：点击“打开合成聊天实验室”，添加流式一轮，确认 Saved 后关闭标签页，在会话库重新查看。
-
-```text
-[user]
-如何完成一个小闭环？
-
-[assistant]
-保存、找回，再复制上下文。
-```
-
-格式中的 `[user]` 和 `[assistant]` 必须独占一行。若消息正文含有相同独占行，使用 KeepTemp JSON 文件导入，以无歧义保留文字。导入不是自动角色识别。JSON schema 为 `{ "version": 1, "session": { "title": "...", "messages": [{ "role": "user", "text": "..." }] } }`。重新导入总是创建新的本地副本，不信任导入文件的 id、排除标记或授权。
-
-点击“复制上下文”后，主动打开新 ChatGPT 会话，自行选择 Temporary 模式并粘贴发送。不会自动输入或发送。它不能恢复原会话、附件和工具状态。
-
-## 开发与验证
-
-```sh
 npm run typecheck
 npm test
 npm run build
@@ -46,19 +45,12 @@ npm run test:browser
 npm run zip
 ```
 
-CI 配置示例见 `docs/github-actions.example.yml`，尚未启用远端 Actions。
+浏览器集成测试通过请求路由为 chatgpt.com 提供本地合成 HTML，再运行生产内容脚本、真实 MV3 后台和 IndexedDB。不会连接真实平台，不读取个人账号或用户 Chrome profile。它能证明端到端链路，不能证明当前在线网站 DOM 匹配。CI 示例在 `docs/github-actions.example.yml`，未启用远端 Actions。
 
-浏览器测试加载真实构建产物，使用独立临时配置。`npm run dev` 供开发使用，隐私验收请使用生产 build；生产 CSP 禁止 connect，开发热更新可能需要 WXT 开发连接。
+仍保留主动导入、全文搜索、Markdown/JSON 导出和合成实验室作为辅助能力。导入支持 KeepTemp JSON，或每个角色以独占一行 `[user]` / `[assistant]` 开始的文字。正文含角色分隔符时用 JSON，避免歧义。
 
 - [架构](docs/architecture.md)
-- [可行性与官方资料](docs/feasibility.md)
-- [隐私与安全边界](PRIVACY.md)
-- [测试结果与人工验收](docs/testing.md)
+- [测试与真实页面验收](docs/testing.md)
+- [隐私边界](PRIVACY.md)
 
-## 已知限制
-
-仅 Chrome；无真实平台自动采集。正文搜索为小库设计的线性检索。24000 字符提示只是长上下文启发，不是模型 token 容量计算。未提交的流式尾部可能在立即关闭时丢失；请以 Saved 状态为准。暂停后恢复会保存仍可见的内容，永久停止某段合成对话请使用“排除此会话”。刷新模拟页保留本地会话身份，但不重建页面文字；新添加的合成轮次继续并入记录。浏览器重启不保证模拟 tab id 稳定。
-
-本地数据库未加密，不是密码保险库；无自动备份，卸载会丢失数据。删除本地记录不改变平台端保留，也不会删除已导出文件。
-
-MIT License。当前按要求使用私有 GitHub 仓库；包含开源许可不代表仓库已公开。商店上架前须发布隐私政策、完成披露，并复核条款。下一步只解决真实平台自动捕获的许可与来源。明确获准前暂停功能扩展；合成测试继续作为工程证据保留。
+MIT License；GitHub 仓库按用户要求保持私有。

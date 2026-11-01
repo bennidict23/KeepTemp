@@ -70,13 +70,16 @@ test("synthetic capture persists across refresh and closing the tab; tabs remain
     panel.getByRole("button", { name: "我了解并同意本地保存" }),
   ).toBeVisible();
 });
-test("real build has no host access and blocks regular/unknown synthetic chats", async () => {
+test("real build limits content injection to ChatGPT and blocks regular/unknown synthetic chats", async () => {
   const manifest = JSON.parse(
     await fs.readFile(".output/chrome-mv3/manifest.json", "utf8"),
   );
   expect(manifest.permissions).toEqual(["sidePanel"]);
   expect(manifest.host_permissions).toBeUndefined();
-  expect(manifest.content_scripts).toBeUndefined();
+  expect(manifest.content_scripts).toHaveLength(1);
+  expect(manifest.content_scripts[0].matches).toEqual([
+    "https://chatgpt.com/*",
+  ]);
   const page = await browser.newPage();
   await page.goto(`${base}/demo.html`);
   await page.locator("#mode").selectOption("false");
@@ -153,4 +156,177 @@ test("real IndexedDB write failure displays error and never Saved", async () => 
   await expect(panel.locator(".session")).toHaveCount(0);
   await page.close();
   await panel.close();
+});
+
+test("production ChatGPT content script captures synthetic DOM automatically via worker, no real account", async () => {
+  // Route the entire supported origin to local synthetic HTML. Never contact ChatGPT.
+  const html = `<!doctype html><html><head><title>Synthetic ChatGPT fixture</title></head><body><header><button data-testid="temporary-chat-button" aria-pressed="true">Temporary</button></header><main><article data-testid="conversation-turn-0"><div data-message-author-role="user" data-message-id="synthetic-user-1"><div class="whitespace-pre-wrap">synthetic question</div></div></article><article data-testid="conversation-turn-1"><div data-message-author-role="assistant" data-message-id="synthetic-answer-1"><div class="markdown"><p>synthetic answer</p></div></div></article></main></body></html>`;
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: html }),
+  );
+  const panel = await browser.newPage();
+  await panel.goto(`${base}/sidepanel.html`);
+  // Previous test granted manual consent, but this build requires a separate explicit switch.
+  const chat = await browser.newPage();
+  await chat.goto("https://chatgpt.com/?temporary-chat=true");
+  const status = chat.locator("#keeptemp-status").getByRole("status");
+  await expect(status).toContainText("尚未授权");
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await panel
+    .getByRole("button", { name: "启用 ChatGPT 自动保存", exact: true })
+    .click();
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("ChatGPT");
+  await chat.evaluate(async () => {
+    const p = document.querySelector(".markdown p")!;
+    for (let i = 1; i <= 20; i++) {
+      p.textContent = "synthetic streamed " + i;
+      await new Promise((r) => setTimeout(r, 35));
+    }
+  });
+  await expect(status).toContainText("Saved");
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText(
+    "synthetic streamed 20",
+  );
+  await chat.evaluate(() =>
+    history.pushState(
+      null,
+      "",
+      "/c/synthetic-conversation?temporary-chat=true",
+    ),
+  );
+  await chat.reload();
+  await expect(status).toContainText("Saved");
+  await panel.getByRole("button", { name: "← 会话库", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(1);
+  // Same URL, another tab: independent persistence scope.
+  const other = await browser.newPage();
+  await other.goto(chat.url());
+  await expect(
+    other.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(2);
+  await other.close();
+  // Same article indices but a new first native user id must create a different session.
+  await chat.evaluate(() => {
+    document.querySelector<HTMLElement>(
+      '[data-message-author-role="user"]',
+    )!.dataset.messageId = "synthetic-user-2";
+    history.pushState(null, "", "/?temporary-chat=true");
+  });
+  await expect(panel.locator(".session")).toHaveCount(3);
+  await expect(status).toContainText("Saved");
+  await chat
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "暂停", exact: true })
+    .click();
+  await expect(status).toContainText("已暂停");
+  await chat.evaluate(
+    () =>
+      (document.querySelector(".markdown p")!.textContent =
+        "paused synthetic text"),
+  );
+  await expect(status).toContainText("已暂停");
+  await chat
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "恢复（含可见内容）" })
+    .click();
+  await expect(status).toContainText("Saved");
+  // Regular mode must suppress writes even with a stale temporary URL.
+  await chat.evaluate(() => {
+    document
+      .querySelector("header button")!
+      .setAttribute("aria-pressed", "false");
+    document.querySelector<HTMLElement>(
+      '[data-message-author-role="user"]',
+    )!.dataset.messageId = "regular-user";
+  });
+  await expect(status).toContainText("普通聊天，不保存");
+  await expect(panel.locator(".session")).toHaveCount(3);
+  await chat.evaluate(() => {
+    document
+      .querySelector("header button")!
+      .setAttribute("aria-pressed", "true");
+    document.querySelector<HTMLElement>(
+      '[data-message-author-role="user"]',
+    )!.dataset.messageId = "synthetic-user-2";
+  });
+  await expect(status).toContainText("Saved");
+  chat.on("dialog", (d) => d.accept());
+  await chat
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "排除此会话" })
+    .click();
+  await expect(status).toContainText("已排除");
+  await expect(panel.locator(".session")).toHaveCount(2);
+  await panel.reload();
+  await expect(panel.locator(".session")).toHaveCount(2);
+  panel.on("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
+  await expect(
+    panel.getByRole("button", { name: "我了解并同意本地保存" }),
+  ).toBeVisible();
+  await expect(status).toContainText("尚未授权");
+  await chat.evaluate(
+    () =>
+      (document.querySelector<HTMLElement>(
+        '[data-message-author-role="user"]',
+      )!.dataset.messageId = "after-reset"),
+  );
+  await expect(status).toContainText("尚未授权");
+  await panel.close();
+  await chat.close();
+  await browser.unroute("https://chatgpt.com/**");
+});
+
+test("ChatGPT worker storage failure is visible and retries without claiming Saved", async () => {
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: '<!doctype html><main><article data-testid="conversation-turn-0"><div data-message-author-role="user" data-message-id="quota-synthetic">synthetic quota test</div></article></main>',
+    }),
+  );
+  const panel = await browser.newPage();
+  await panel.goto(`${base}/sidepanel.html`);
+  await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
+  await panel
+    .getByRole("button", { name: "启用 ChatGPT 自动保存", exact: true })
+    .click();
+  const worker = browser.serviceWorkers()[0]!;
+  await worker.evaluate(() => {
+    const proto = IDBObjectStore.prototype;
+    Object.defineProperty(proto, "keepTempOriginalPut", {
+      value: proto.put,
+      configurable: true,
+    });
+    proto.put = function () {
+      throw new DOMException("synthetic failure", "QuotaExceededError");
+    };
+  });
+  const chat = await browser.newPage();
+  await chat.goto("https://chatgpt.com/?temporary-chat=true");
+  const status = chat.locator("#keeptemp-status").getByRole("status");
+  await expect(status).toContainText("保存失败");
+  await expect(status).not.toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await worker.evaluate(() => {
+    const proto =
+      IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
+        keepTempOriginalPut?: typeof IDBObjectStore.prototype.put;
+      };
+    proto.put = proto.keepTempOriginalPut!;
+    delete proto.keepTempOriginalPut;
+  });
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  panel.on("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
+  await expect(status).toContainText("尚未授权");
+  await chat.close();
+  await panel.close();
+  await browser.unroute("https://chatgpt.com/**");
 });

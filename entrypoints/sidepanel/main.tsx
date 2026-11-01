@@ -12,6 +12,12 @@ import {
 import type { Session } from "../../src/model";
 import "../../src/style.css";
 const repo = new StorageRepository();
+const sourceName = (source: Session["source"]) =>
+  source === "chatgpt"
+    ? "ChatGPT"
+    : source === "mock"
+      ? "合成模拟"
+      : "主动导入";
 function App() {
   const [consent, setConsent] = useState<boolean | null>(null),
     [sessions, setSessions] = useState<Session[]>([]),
@@ -22,9 +28,11 @@ function App() {
     [title, setTitle] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
+  const [autoCapture, setAutoCapture] = useState(false);
   const current = sessions.find((s) => s.id === selected);
   async function refresh() {
     setConsent(await repo.consent());
+    setAutoCapture(await repo.autoCapture());
     setSessions(await repo.list(query));
   }
   useEffect(() => {
@@ -35,6 +43,7 @@ function App() {
           s = await repo.list(query);
         if (active) {
           setConsent(c);
+          setAutoCapture(await repo.autoCapture());
           setSessions(s);
         }
       } catch {
@@ -121,8 +130,8 @@ function App() {
               可能为安全目的保留最多 30 天。
             </p>
             <p>
-              本版不自动读取 ChatGPT。你可主动粘贴内容或导入
-              JSON；自动捕获仅在合成模拟页运行。
+              你可在授权后单独启用 ChatGPT 自动保存。启用后只读取被识别为
+              Temporary 的可见对话文字；普通或无法识别的聊天不保存。
             </p>
           </div>
           <button
@@ -201,7 +210,7 @@ function App() {
             ← 会话库
           </button>
           <div className="meta">
-            {current.source === "mock" ? "合成模拟" : "主动导入"} ·{" "}
+            {sourceName(current.source)} ·{" "}
             {new Date(current.updatedAt).toLocaleString()}
           </div>
           <h1>{current.title}</h1>
@@ -251,7 +260,7 @@ function App() {
             ))}
           </div>
           <div className="toolbar">
-            {current.source === "mock" && !current.excluded && (
+            {current.source !== "manual" && !current.excluded && (
               <button
                 disabled={busy}
                 onClick={() =>
@@ -284,6 +293,37 @@ function App() {
           <span className="eyebrow">YOUR LOCAL SHELF</span>
           <h1>值得留下的对话</h1>
           <p>留一份文字，为下一次思考接上文。</p>
+          <div className="card">
+            <h3>ChatGPT 自动保存 · 实验功能</h3>
+            <p>
+              启用后，你在 chatgpt.com 的 Temporary Chat
+              可见文字会自动保存在本机。页面右下角显示状态，可暂停或排除。普通聊天与识别不确定的页面不保存。
+            </p>
+            <button
+              className={autoCapture ? "" : "primary"}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => repo.setAutoCapture(!autoCapture),
+                  autoCapture
+                    ? "已关闭自动保存"
+                    : "已启用。请刷新 ChatGPT 页面，打开 Temporary Chat 查看右下角状态。",
+                )
+              }
+            >
+              {autoCapture ? "关闭 ChatGPT 自动保存" : "启用 ChatGPT 自动保存"}
+            </button>
+            {autoCapture && (
+              <a
+                className="external"
+                href="https://chatgpt.com/?temporary-chat=true"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开 ChatGPT 临时聊天 ↗
+              </a>
+            )}
+          </div>
           <button className="primary full" onClick={() => setAdding(true)}>
             ＋ 粘贴或导入对话
           </button>
@@ -303,8 +343,8 @@ function App() {
                   onClick={() => setSelected(s.id)}
                 >
                   <span className="meta">
-                    {s.source === "mock" ? "SYNTHETIC" : "IMPORTED"} ·{" "}
-                    {s.messages.length} 条消息{s.excluded ? " · 已排除" : ""}
+                    {sourceName(s.source)} · {s.messages.length} 条消息
+                    {s.excluded ? " · 已排除" : ""}
                   </span>
                   <strong>{s.title}</strong>
                   <span>{s.messages.at(-1)?.text.slice(0, 100)}</span>
@@ -316,7 +356,7 @@ function App() {
                 <h3>
                   {query ? "没有匹配的对话" : "你的本地书架，等第一段对话"}
                 </h3>
-                <p>主动导入，或先用合成模拟体验完整流程。</p>
+                <p>启用自动保存后，在 ChatGPT Temporary Chat 开始对话即可。</p>
               </div>
             )}
           </div>
@@ -329,7 +369,10 @@ function App() {
             打开合成聊天实验室 ↗
           </button>
           <footer>
-            <p>ChatGPT 自动采集未启用 · 无网站读取权限</p>
+            <p>
+              ChatGPT 自动保存：{autoCapture ? "已启用" : "未启用"} · 仅
+              chatgpt.com
+            </p>
             <p>本地存储未加密；请按需导出备份。</p>
             <button
               className="danger link"

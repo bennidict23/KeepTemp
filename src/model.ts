@@ -9,20 +9,22 @@ export interface Message {
 }
 export interface Session {
   id: string;
-  source: "mock" | "manual";
+  source: "mock" | "manual" | "chatgpt";
   title: string;
   createdAt: number;
   updatedAt: number;
   messages: Message[];
   excluded?: boolean;
+  paused?: boolean;
   deleted?: boolean;
 }
 export interface Snapshot {
+  source?: "mock" | "chatgpt";
   id: string;
   temporary: boolean | null;
   messages: Message[];
 }
 export interface PlatformAdapter {
-  readonly source: "mock";
+  readonly source: "mock" | "chatgpt";
   read(): Snapshot | null;
 }

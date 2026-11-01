@@ -1,3 +1,19 @@
+# KeepTemp 0.2.0 架构更新
+
+新增 ChatGPTAdapter 与 chatgpt.content 内容脚本（仅 chatgpt.com）。真实页面不能直接访问扩展 IndexedDB，因此使用 runtime 消息 → MV3 后台 → StorageRepository 事务。后台验证发送方扩展 id、tab id、顶层 frame、精确 origin 以及有上限的快照 schema；忽略外部/iframe 来源。生产后台不发网络请求。
+
+授权分两层：meta.consent 为本地存储授权，meta.chatgpt-consent 为主动开启网站自动保存；真实捕获事务同时验证两者。后台重启后仍从 IndexedDB 获取授权和排除状态，不依赖内存。内容脚本授权检查失败前不读取消息。
+
+ChatGPT 会话键为 chatgpt:<tab id>:thread:<首条用户原生消息 UUID>，不使用 URL 路径作为会话身份，避免生成回复后 / 到 /c 导航导致拆分。消息优先使用 article 的 turn id / turn testid，缺少时用原生 message id；仅当首条用户有原生稳定 id 时才允许捕获，不能把重复的 conversation-turn-0 当作不同会话的身份。不同 tab 独立；浏览器重启后的 tab id 不稳定是已知限制。
+
+内容脚本每 350ms 合并 DOM 变化，单次写入期间不并发排队。指纹只包含会话 id、消息 id、角色和文字，不包含不断变化的扫描时间。已提交才记为 Saved；失败保留 dirty 并重试。完整扫描之后仍可能在立即关标签页时丢失未提交尾部。脚本显示 Shadow DOM 状态栏及暂停/排除按钮；不向网页主世界暴露 runtime bridge。
+
+暂停状态持久化于 Session.paused。网页排除采用无内容 tombstone 并删除副本；面板排除保留副本并设 excluded。全局关闭 autoCapture 后事务拒绝真实写入；清空在事务中同时清除内容和两个授权，活跃标签页也不能重新写回。
+
+临时模式以明确的激活控件、状态或 URL 参数识别；纯正文包含 Temporary 不构成信号。显式 off 覆盖 URL；普通、未知模式及共享链接不捕获。全部选择器均为实验性，真实当前 ChatGPT DOM 尚未在账号中验证。公开实现可作为结构参考，不能当作本站当前结构保证。
+
+以下为 0.1.0 原型模块设计记录；新增能力及身份规则以上文为准。
+
 # KeepTemp 架构
 
 ## 范围

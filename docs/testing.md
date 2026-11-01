@@ -1,26 +1,40 @@
 # 验证记录
 
-合成数据；macOS Apple Silicon；Node.js 22；生产 Chrome MV3 构建。浏览器测试使用 Playwright 下载的 Chromium 和独立临时配置，不读取用户 Chrome profile。
+macOS Apple Silicon / Node.js 22 / Chrome MV3 生产构建。全部自动化测试只使用合成内容，运行于 Playwright 独立临时浏览器 profile，不读取用户 Chrome 数据。
 
-## 实际执行
+## 0.2.0 最终执行结果
 
-2026-11-02 实际结果：`npm run typecheck` 通过；`npm test` **17/17 通过**；`npm run build` 通过；`npm run test:browser` **4/4 通过**（10.4s）；`npm run zip` 通过（约 79KB）；`npm audit` 全依赖 **0 个已知漏洞**。
+2026-11-02：`npm run typecheck` 通过；`npm test` **26/26 通过**；`npm run build` 通过；`npm run test:browser` **6/6 通过**（21.2 秒）；`npm run zip` 通过（86.63 KB）；`npm audit` **0 个已知漏洞**。真实账号兼容性尚未验收。
 
-[合成数据 UI 截图](sidepanel-preview.png)。测试范围：
+## 0.2.0 验证范围
 
-- 核心测试：授权门控、50 次流式快照去重、多轮增量、旧更新保护、首次时间保留、重新连接持久化、普通/未知类型拒绝、标签页和 SPA 身份隔离、排除与 tombstone、清空并撤权的并发写入、全文搜索、等待提交后 Saved、失败状态和重试、暂停、DOM 消息稳定身份、刷新后消息顺序、角色/Unicode/多行恢复、JSON round-trip、HTML 纯文本与非法/超大导入、长上下文不截断。
-- 浏览器集成：真实 MV3 构建加载；合成流式回复始终一条 assistant；刷新后同一会话增量；相同 URL 的两个 tab 隔离；关标签页后读取；重新加载会话库；清空撤权；清单仅 sidePanel 且无内容脚本或 host 权限；普通/未知来源跳过。
-- 导入/恢复浏览器测试：主动粘贴、HTML 不执行、系统剪贴板逐字比较、JSON 下载内容比较、全文搜索、删除、清空授权。
-- 故障注入：在独立合成测试页让真实 IndexedDB put 抛 QuotaExceededError，检查显示失败而非 Saved，且库中没有虚假记录。此测试不是磁盘实测耗尽。
+单元测试覆盖存储事务、流式去重、消息顺序、授权、并发清空、导入恢复，以及新适配器的角色/段落提取、控件过滤、Temporary 正反信号、隐藏分支、稳定身份、缺少身份时拒绝、同 URL 不同 tab 隔离、消息桥 schema 和独立捕获授权。
 
-## 需要用户人工验收
+浏览器集成覆盖：
 
-1. 按 README 加载 `.output/chrome-mv3`，点击工具栏图标；确认真实 Side Panel 能打开，在实际面板宽度下无横向溢出。
-2. 阅读首次隐私说明并授权，用合成模拟页添加两轮；等待 Saved，关闭模拟页，确认可读到 4 条消息。
-3. 在模拟页暂停/恢复、切普通/未知、新建 SPA 会话；确认 UI 语义符合说明。Side Panel 排除后，模拟页改动不应继续保存。
-4. 复制合成上下文，手动粘贴到本地文本编辑器核对；不必登录 ChatGPT 或发送任何真实内容。
-5. 导出 Markdown/JSON，导入 JSON，确认内容一致。删除单会话，再清空并撤回授权，确认重新出现授权页面。
+- 原有合成实验室的流式保存、刷新、关标签页后读取、多标签隔离和清空。
+- 构建清单仅声明 sidePanel API 权限，内容脚本匹配仅 https://chatgpt.com/*，无额外 host_permissions。
+- 主动导入、HTML 纯文字显示、实际剪贴板逐字比较、JSON 下载内容比较、搜索与删除。
+- 实验室 IndexedDB 写入错误状态。
+- **生产 ChatGPT 内容脚本 → runtime → MV3 后台 → 扩展 IndexedDB → Side Panel 的完整自动保存链路**。通过 Playwright 路由将 chatgpt.com 请求直接返回本地合成 HTML，测试本身不向 ChatGPT 发请求。覆盖未启用不捕获、20 次流式更新不重复、刷新及 / → /c 导航不拆会话、新原生首条用户 id 不混会话、多标签独立、暂停恢复、普通模式覆盖残留 Temporary URL、排除删除、关页面后读取、清空后活跃页面不能写回。
+- 在 MV3 后台注入 IndexedDB put 的合成 QuotaExceededError，确认真实内容脚本显示失败、会话库没有记录，恢复后自动重试并成功保存。此项不是耗尽真实磁盘空间。
 
-## 不宣称验证的部分
+原型 0.1.0 曾通过 17 项核心和 4 项浏览器测试。当前结果以本次 0.2.0 最终执行记录为准。
 
-真实账号、ChatGPT DOM、真实 Temporary 自动识别、商店审核、断电与 OS 重启、SSD 擦除、浏览器真实磁盘耗尽、Chrome 工具栏打开 Side Panel 的人工体验。自动化测试直接打开 sidepanel.html 验证同一页面的内容行为，不等于完整人工 Side Panel 验收。CI 配置示例保存在 `docs/github-actions.example.yml`。本次 GitHub CLI 授权没有 workflow scope；为避免扩大权限，未启用远端 Actions，因此没有远端 CI 通过的结论。需要时可由仓库所有者将示例移到 `.github/workflows/ci.yml`。
+## 用户现在可以做的真实页面验收
+
+1. 在 chrome://extensions 刷新 KeepTemp，确认版本 **0.2.0**，允许 chatgpt.com 站点访问。保持原扩展目录和 id，不需要清空数据库。
+2. 在 KeepTemp Side Panel 点击“启用 ChatGPT 自动保存”；这是旧用户也需要做的一次独立授权。
+3. 刷新 ChatGPT 网页，开始 Temporary Chat（也可点面板入口），只用一句无敏感内容的测试问题。
+4. 页面右下角应出现 KeepTemp 状态。等 Saved 后查看面板，应自动出现对应 user/assistant 文字。
+5. 继续问第二轮，等 Saved，确认同一条会话内有四条消息、流式回复未拆分。
+6. 刷新网页后再聊一轮、开另一个临时聊天，检查身份不混淆；普通聊天不应被保存。
+7. 试暂停/恢复、排除，最后删除合成测试记录。排除网页当前会话会同时删除本地副本；面板排除会保留已有副本。
+
+若没有状态栏：检查是否刷新了 ChatGPT 标签页、扩展是否允许访问 chatgpt.com、版本是否为 0.2.0。若一直等待识别：反馈状态文字和界面语言即可，不需要分享私人聊天内容。若保存失败：先保留页面，可关闭自动保存，等待修复；不要把未保存当作已备份。
+
+## 尚未验证
+
+当前在线 ChatGPT DOM、真实账号 Temporary 识别、不同语言/灰度界面、真实分支编辑/重新生成、附件/工具、商店审核、断电/OS 重启/SSD 擦除、真实磁盘耗尽、Chrome 工具栏打开 Side Panel 的人工体验。合成 DOM 测试通过不等于真实网站兼容性验收通过。
+
+已有 UI 截图只含合成内容。CI 示例在 docs/github-actions.example.yml，未取得 workflow scope，尚未启用远端 Actions，无远端 CI 通过结论。

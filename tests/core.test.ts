@@ -70,7 +70,7 @@ describe("transactional storage and capture", () => {
     await r.capture({ ...snapshot(), temporary: false });
     await r.capture({ ...snapshot(), temporary: null });
     expect(await r.list()).toHaveLength(0);
-    expect(chatGPTCapability.enabled).toBe(false);
+    expect(chatGPTCapability.enabled).toBe(true);
   });
   it("keeps tab and navigation scopes separate", async () => {
     const r = await repository();

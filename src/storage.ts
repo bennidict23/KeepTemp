@@ -17,6 +17,12 @@ export class StorageRepository {
   async consent() {
     return (await this.db).get("meta", "consent").then(Boolean);
   }
+  async autoCapture() {
+    return Boolean(await (await this.db).get("meta", "chatgpt-consent"));
+  }
+  async setAutoCapture(enabled: boolean) {
+    await (await this.db).put("meta", enabled, "chatgpt-consent");
+  }
   async authorize() {
     await (await this.db).put("meta", true, "consent");
   }
@@ -44,9 +50,16 @@ export class StorageRepository {
       await tx.done;
       return false;
     }
+    if (
+      snapshot.source === "chatgpt" &&
+      !(await tx.objectStore("meta").get("chatgpt-consent"))
+    ) {
+      await tx.done;
+      return false;
+    }
     const store = tx.objectStore("sessions");
     const old = await store.get(snapshot.id);
-    if (old?.excluded || old?.deleted) {
+    if (old?.excluded || old?.deleted || old?.paused) {
       await tx.done;
       return false;
     }
@@ -66,8 +79,13 @@ export class StorageRepository {
     const now = Date.now();
     await store.put({
       id: snapshot.id,
-      source: "mock",
-      title: old?.title ?? (all[0]?.text.slice(0, 70) || "Synthetic chat"),
+      source: snapshot.source ?? "mock",
+      title:
+        old?.title ??
+        (all[0]?.text.slice(0, 70) ||
+          (snapshot.source === "chatgpt"
+            ? "ChatGPT Temporary Chat"
+            : "Synthetic chat")),
       createdAt: old?.createdAt ?? now,
       updatedAt: now,
       messages: all,
@@ -88,6 +106,13 @@ export class StorageRepository {
     const tx = db.transaction("sessions", "readwrite");
     const s = await tx.store.get(id);
     if (s) await tx.store.put({ ...s, excluded: true });
+    await tx.done;
+  }
+  async pause(id: string, paused: boolean) {
+    const db = await this.db;
+    const tx = db.transaction("sessions", "readwrite");
+    const s = await tx.store.get(id);
+    if (s && !s.deleted) await tx.store.put({ ...s, paused });
     await tx.done;
   }
   async delete(id: string) {
