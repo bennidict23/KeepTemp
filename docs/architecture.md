@@ -1,3 +1,11 @@
+# 0.2.2 新布局补充
+
+消息候选支持旧角色标记和新版 content/chatgpt search unit key 的 :user/:assistant 后缀，不使用视觉左右位置推断。存在活动时间线时仅扫描其 region，排除 presentation 副本、表单与编辑器。嵌套的同角色包装仅选外层一次。消息身份优先使用原生 turn key（按角色分离），不使用 fallback-turn 的序号作为新布局身份。
+
+新版会话标识优先使用祖先 conversation selection target；首条挂载消息发生变化不会自动建立另一会话。该标记不存在时退回已知原生消息/turn id，无法保证所有虚拟列表变体无拆分。保持 tab id 隔离。
+
+仓库增量合并会保留卸载的消息；新出现的旧历史消息，按快照内已知的下一/上一消息锚点插入，避免一律追加到尾部。完全无交集的片段没有足够证据确定绝对位置，是已知限制。真实适配器仍不读取私有 API、不自动滚动、不主动发消息。
+
 # KeepTemp 0.2.0 架构更新
 
 新增 ChatGPTAdapter 与 chatgpt.content 内容脚本（仅 chatgpt.com）。真实页面不能直接访问扩展 IndexedDB，因此使用 runtime 消息 → MV3 后台 → StorageRepository 事务。后台验证发送方扩展 id、tab id、顶层 frame、精确 origin 以及有上限的快照 schema；忽略外部/iframe 来源。生产后台不发网络请求。

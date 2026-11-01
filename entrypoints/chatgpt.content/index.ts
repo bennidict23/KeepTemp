@@ -102,6 +102,11 @@ export default defineContentScript({
       attributeFilter: [
         "data-message-id",
         "data-message-author-role",
+        "data-turn-key",
+        "data-content-search-unit-key",
+        "data-chatgpt-search-unit-key",
+        "data-chatgpt-search-message-ids",
+        "data-chatgpt-conversation-selection-target",
         "aria-pressed",
         "aria-checked",
         "data-state",

@@ -357,7 +357,7 @@ test("role=main with ancestor ids saves and diagnostic copy contains no conversa
     .getByRole("textbox", { name: "结构诊断" })
     .inputValue();
   expect(JSON.parse(report)).toMatchObject({
-    version: "0.2.1",
+    version: "0.2.2",
     reason: "ready",
     mode: true,
     scopedRoleNodes: 2,
@@ -384,6 +384,104 @@ test("role=main with ancestor ids saves and diagnostic copy contains no conversa
     panel.getByRole("button", { name: "我了解并同意本地保存" }),
   ).toBeVisible();
   await chat.close();
+  await panel.close();
+  await browser.unroute("https://chatgpt.com/**");
+});
+
+test("new app-shell layout saves without any legacy markers and retains virtualized turns", async () => {
+  const turn = (id: string, q: string, a: string) =>
+    `<div data-turn-key="${id}"><div data-content-search-turn-key="fallback-turn-0"><div data-chatgpt-search-unit-key="fallback-turn-0:0:user" data-chatgpt-search-message-ids="${id}"><div data-content-search-unit-key="fallback-turn-0:0:user"><div data-user-message-bubble="true">${q}</div></div></div><div data-chatgpt-search-unit-key="fallback-turn-0:0:assistant" data-chatgpt-search-message-ids="${id}-answer,${id}-answer"><div data-content-search-unit-key="fallback-turn-0:0:assistant"><div data-markdown-text-style="assistant-message"><p>${a}</p></div><button>Copy</button></div></div></div></div>`;
+  const first = turn(
+    "synthetic-shell-turn-1",
+    "app shell question 1",
+    "app shell answer 1",
+  );
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: `<!doctype html><main><div role="region" data-app-action-timeline-scroll><div data-chatgpt-conversation-selection-target="synthetic-shell-conversation" data-thread-find-target="conversation">${first}</div></div><div role="presentation"><div data-content-search-unit-key="hidden:0:user">not a visible turn</div></div></main>`,
+    }),
+  );
+  const panel = await browser.newPage();
+  await panel.goto(`${base}/sidepanel.html`);
+  await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
+  await panel
+    .getByRole("button", { name: "启用 ChatGPT 自动保存", exact: true })
+    .click();
+  const chat = await browser.newPage();
+  await chat.goto("https://chatgpt.com/?temporary-chat=true");
+  expect(
+    await chat
+      .locator(
+        '[data-message-author-role],[data-turn-id],[data-testid^="conversation-turn-"]',
+      )
+      .count(),
+  ).toBe(0);
+  const status = chat.locator("#keeptemp-status").getByRole("status");
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText("app shell answer 1");
+  const second = turn(
+    "synthetic-shell-turn-2",
+    "app shell question 2",
+    "app shell answer 2",
+  );
+  await chat.evaluate(
+    (html) =>
+      document
+        .querySelector("[data-chatgpt-conversation-selection-target]")!
+        .insertAdjacentHTML("beforeend", html),
+    second,
+  );
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".messages article")).toHaveCount(4);
+  // First mounted turn disappears and gets replaced, as with a sliding DOM window.
+  await chat.evaluate(() =>
+    document.querySelector("[data-turn-key]")!.remove(),
+  );
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".messages article")).toHaveCount(4);
+  await chat.evaluate(
+    (html) =>
+      document
+        .querySelector("[data-chatgpt-conversation-selection-target]")!
+        .insertAdjacentHTML("afterbegin", html),
+    first,
+  );
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".messages article")).toHaveCount(4);
+  await expect(panel.locator(".messages article").first()).toContainText(
+    "app shell question 1",
+  );
+  await chat
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "复制诊断（不含聊天内容）" })
+    .click();
+  const report = JSON.parse(
+    await chat
+      .locator("#keeptemp-status")
+      .getByRole("textbox", { name: "结构诊断" })
+      .inputValue(),
+  );
+  expect(report).toMatchObject({
+    version: "0.2.2",
+    reason: "ready",
+    roleNodes: 0,
+    activeTimelines: 1,
+    userNodes: 2,
+    assistantNodes: 2,
+  });
+  await chat.close();
+  await panel.getByRole("button", { name: "← 会话库", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(1);
+  panel.on("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
+  await expect(
+    panel.getByRole("button", { name: "我了解并同意本地保存" }),
+  ).toBeVisible();
   await panel.close();
   await browser.unroute("https://chatgpt.com/**");
 });

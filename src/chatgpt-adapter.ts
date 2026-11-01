@@ -58,25 +58,104 @@ export function temporaryMode(doc: Document, url: URL): boolean | null {
   }
   return null;
 }
+const roleSelector =
+  '[data-message-author-role],[data-content-search-unit-key$=":user"],[data-content-search-unit-key$=":assistant"],[data-chatgpt-search-unit-key$=":user"],[data-chatgpt-search-unit-key$=":assistant"]';
+function roleOf(el: HTMLElement): "user" | "assistant" | null {
+  const native = el.dataset.messageAuthorRole;
+  if (native === "user" || native === "assistant") return native;
+  const key =
+    el.dataset.chatgptSearchUnitKey ?? el.dataset.contentSearchUnitKey ?? "";
+  return key.endsWith(":user")
+    ? "user"
+    : key.endsWith(":assistant")
+      ? "assistant"
+      : null;
+}
+function candidateNodes(doc: Document) {
+  const hasTimeline = Boolean(
+    doc.querySelector('[data-app-action-timeline-scroll][role="region"]'),
+  );
+  const all = [...doc.querySelectorAll<HTMLElement>(roleSelector)].filter(
+    (el) => {
+      if (
+        !el.closest('main,[role="main"]') ||
+        el.closest('[role="presentation"],form,[contenteditable="true"]')
+      )
+        return false;
+      return (
+        !hasTimeline ||
+        Boolean(el.closest('[data-app-action-timeline-scroll][role="region"]'))
+      );
+    },
+  );
+  // Search-index wrappers and their content wrappers can both carry the role.
+  return all.filter(
+    (el) =>
+      !all.some(
+        (parent) =>
+          parent !== el && parent.contains(el) && roleOf(parent) === roleOf(el),
+      ),
+  );
+}
 function nativeMessageId(el: HTMLElement): string | undefined {
-  return (
+  const legacy =
     el.dataset.messageId ??
     el.closest<HTMLElement>("[data-message-id]")?.dataset.messageId ??
-    el.querySelector<HTMLElement>("[data-message-id]")?.dataset.messageId
+    el.querySelector<HTMLElement>("[data-message-id]")?.dataset.messageId;
+  if (legacy) return legacy;
+  const owner =
+    el.closest<HTMLElement>("[data-chatgpt-search-message-ids]") ??
+    el.querySelector<HTMLElement>("[data-chatgpt-search-message-ids]");
+  const raw = owner?.dataset.chatgptSearchMessageIds;
+  if (!raw) return;
+  let values: unknown;
+  try {
+    values = raw.trim().startsWith("[") ? JSON.parse(raw) : raw.split(/[\s,]+/);
+  } catch {
+    return;
+  }
+  if (
+    !Array.isArray(values) ||
+    !values.every(
+      (v) => typeof v === "string" && /^[a-zA-Z0-9_:.-]{1,250}$/.test(v),
+    )
+  )
+    return;
+  const ids = [...new Set(values as string[])];
+  return ids.length === 1 ? ids[0] : undefined;
+}
+function turnKey(el: HTMLElement): string | undefined {
+  return (
+    el
+      .closest<HTMLElement>("[data-turn-key],[data-turn-id]")
+      ?.getAttribute("data-turn-key") ??
+    el.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId
   );
 }
 function stableId(el: HTMLElement): string | null {
   const turn = el.closest<HTMLElement>(
-    '[data-turn-id],[data-testid^="conversation-turn-"]',
+    '[data-turn-key],[data-turn-id],[data-testid^="conversation-turn-"]',
   );
   const id =
-    turn?.dataset.turnId ?? turn?.dataset.testid ?? nativeMessageId(el);
+    turn?.dataset.turnKey ??
+    turn?.dataset.turnId ??
+    turn?.dataset.testid ??
+    nativeMessageId(el);
   return id && id.length <= 250 ? id : null;
+}
+function sessionKey(first: HTMLElement) {
+  const container = first.closest<HTMLElement>(
+    '[data-chatgpt-conversation-selection-target][data-thread-find-target="conversation"]',
+  );
+  const conversation = container?.dataset.chatgptConversationSelectionTarget;
+  if (conversation && /^[a-zA-Z0-9_-]{1,250}$/.test(conversation))
+    return `conversation:${conversation}`;
+  return nativeMessageId(first) ?? turnKey(first);
 }
 export function messageText(el: HTMLElement): string {
   const content =
     el.querySelector<HTMLElement>(
-      ".markdown,.whitespace-pre-wrap,[data-message-content]",
+      '[data-user-message-bubble="true"],[data-markdown-text-style="assistant-message"],.markdown,.whitespace-pre-wrap,[data-message-content]',
     ) ?? el;
   const clone = content.cloneNode(true) as HTMLElement;
   clone
@@ -100,13 +179,9 @@ export class ChatGPTAdapter implements PlatformAdapter {
   ) {}
   diagnose() {
     const url = this.location();
-    const all = [
-      ...this.doc.querySelectorAll<HTMLElement>("[data-message-author-role]"),
-    ];
-    const scoped = all.filter((el) => el.closest("main,[role=main]"));
-    const users = scoped.filter(
-      (el) => el.dataset.messageAuthorRole === "user",
-    );
+    const all = [...this.doc.querySelectorAll<HTMLElement>(roleSelector)];
+    const scoped = candidateNodes(this.doc);
+    const users = scoped.filter((el) => roleOf(el) === "user");
     const first = users.find(visible);
     const mode = temporaryMode(this.doc, url);
     const reason =
@@ -120,38 +195,37 @@ export class ChatGPTAdapter implements PlatformAdapter {
               : "message-markers-missing"
             : !first
               ? "user-message-missing"
-              : !(
-                    nativeMessageId(first) ??
-                    first.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId
-                  )
+              : !sessionKey(first)
                 ? "session-id-missing"
                 : scoped.some(
                       (el) =>
-                        visible(el) &&
-                        ["user", "assistant"].includes(
-                          el.dataset.messageAuthorRole ?? "",
-                        ) &&
-                        !stableId(el),
+                        visible(el) && roleOf(el) !== null && !stableId(el),
                     )
                   ? "message-id-missing"
                   : "ready";
     // Fixed enums and numeric counts only: no text, URL path/query values, native ids,
     // account names, arbitrary attributes or HTML are included in the report.
     return {
-      version: "0.2.1",
+      version: "0.2.2",
       reason,
       mode,
       temporaryQuery: url.searchParams.get("temporary-chat") === "true",
       mainRegions: this.doc.querySelectorAll("main,[role=main]").length,
-      roleNodes: all.length,
+      roleNodes: this.doc.querySelectorAll("[data-message-author-role]").length,
+      candidateNodes: all.length,
+      modernUnitNodes: this.doc.querySelectorAll(
+        "[data-chatgpt-search-unit-key],[data-content-search-unit-key]",
+      ).length,
+      activeTimelines: this.doc.querySelectorAll(
+        '[data-app-action-timeline-scroll][role="region"]',
+      ).length,
+      modernTurnNodes: this.doc.querySelectorAll("[data-turn-key]").length,
       scopedRoleNodes: scoped.length,
       visibleRoleNodes: scoped.filter(visible).length,
       userNodes: users.length,
-      assistantNodes: scoped.filter(
-        (el) => el.dataset.messageAuthorRole === "assistant",
-      ).length,
+      assistantNodes: scoped.filter((el) => roleOf(el) === "assistant").length,
       firstUserHasNativeId: Boolean(first && nativeMessageId(first)),
-      firstUserHasTurnId: Boolean(first?.closest("[data-turn-id]")),
+      firstUserHasTurnId: Boolean(first && turnKey(first)),
       turnNodes: this.doc.querySelectorAll(
         '[data-turn-id],[data-testid^="conversation-turn-"]',
       ).length,
@@ -167,22 +241,21 @@ export class ChatGPTAdapter implements PlatformAdapter {
     const temporary = temporaryMode(this.doc, url);
     if (temporary !== true)
       return { id: "unknown", source: "chatgpt", temporary, messages: [] };
-    const nodes = [
-      ...this.doc.querySelectorAll<HTMLElement>(
-        "main [data-message-author-role],[role=main] [data-message-author-role]",
-      ),
-    ].filter(visible);
+    const nodes = candidateNodes(this.doc).filter(visible);
     const now = Date.now();
     const messages: Message[] = [];
     const seen = new Set<string>();
     for (const el of nodes) {
-      const role = el.dataset.messageAuthorRole;
+      const role = roleOf(el);
       if (role !== "user" && role !== "assistant") continue;
       const key = stableId(el);
       // A turn testid is only used for message position inside a native-UUID-scoped session.
       if (!key) return null;
       const id = `${role}:${key}`;
-      if (seen.has(id)) continue;
+      if (seen.has(id)) {
+        // A second independent unit for the same role/turn is ambiguous; never silently drop it.
+        return null;
+      }
       seen.add(id);
       messages.push({
         id,
@@ -193,12 +266,8 @@ export class ChatGPTAdapter implements PlatformAdapter {
         updatedAt: now,
       });
     }
-    const firstNode = nodes.find(
-      (el) => el.dataset.messageAuthorRole === "user",
-    );
-    const firstKey =
-      (firstNode ? nativeMessageId(firstNode) : undefined) ??
-      firstNode?.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId;
+    const firstNode = nodes.find((el) => roleOf(el) === "user");
+    const firstKey = firstNode ? sessionKey(firstNode) : undefined;
     if (!firstKey || firstKey.length > 250 || !messages.length) return null;
     // First user marker is retained when / becomes /c/... and across refreshes.
     return {

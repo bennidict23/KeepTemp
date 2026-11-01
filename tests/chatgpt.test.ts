@@ -186,3 +186,102 @@ describe("structure compatibility and privacy-safe diagnostics", () => {
     expect(a.diagnose().reason).toBe("mode-unknown");
   });
 });
+
+function modernFixture() {
+  document.body.innerHTML = `<main><div role="region" data-app-action-timeline-scroll><div data-chatgpt-conversation-selection-target="synthetic-conversation" data-thread-find-target="conversation"><div data-turn-key="native-user-1"><div data-content-search-turn-key="fallback-turn-0"><div data-chatgpt-search-unit-key="fallback-turn-0:0:user" data-chatgpt-search-message-ids="native-user-1"><div data-content-search-unit-key="fallback-turn-0:0:user"><div data-user-message-bubble="true">new-layout question</div></div></div><div data-chatgpt-search-unit-key="fallback-turn-0:0:assistant" data-chatgpt-search-message-ids='["native-answer-1","native-answer-1"]'><div data-content-search-unit-key="fallback-turn-0:0:assistant"><div data-markdown-text-style="assistant-message"><p>new-layout answer</p></div><button>Copy</button></div></div></div></div></div></div><div role="presentation"><div data-content-search-unit-key="hidden:0:user" data-message-id="hidden-user">hidden text</div></div></main>`;
+  return new ChatGPTAdapter(
+    document,
+    () => new URL("https://chatgpt.com/?temporary-chat=true"),
+  );
+}
+describe("ChatGPT app-shell rollout without legacy attributes", () => {
+  it("captures user and assistant once using semantic search units and native turn keys", () => {
+    const a = modernFixture();
+    expect(
+      document.querySelectorAll(
+        "[data-message-author-role],[data-turn-id],article",
+      ).length,
+    ).toBe(0);
+    const s = a.read()!;
+    expect(s.id).toBe("thread:conversation:synthetic-conversation");
+    expect(s.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "new-layout question"],
+      ["assistant", "new-layout answer"],
+    ]);
+    expect(a.diagnose()).toMatchObject({
+      version: "0.2.2",
+      reason: "ready",
+      roleNodes: 0,
+      userNodes: 1,
+      assistantNodes: 1,
+      activeTimelines: 1,
+    });
+  });
+  it("retains message identity when search-unit indices drift or native answer ids arrive", () => {
+    const a = modernFixture();
+    const first = a.read()!;
+    document.querySelector<HTMLElement>(
+      '[data-chatgpt-search-unit-key$=":assistant"]',
+    )!.dataset.chatgptSearchMessageIds = "different-final-id";
+    document.querySelector<HTMLElement>(
+      "[data-content-search-turn-key]",
+    )!.dataset.contentSearchTurnKey = "fallback-turn-99";
+    expect(a.read()?.messages.map((m) => m.id)).toEqual(
+      first.messages.map((m) => m.id),
+    );
+  });
+  it("retains conversation identity when first visible turn unmounts", () => {
+    const a = modernFixture();
+    const first = a.read()!;
+    const turn = document.querySelector<HTMLElement>("[data-turn-key]")!;
+    turn.dataset.turnKey = "native-user-2";
+    turn.querySelector<HTMLElement>(
+      '[data-chatgpt-search-unit-key$=":user"]',
+    )!.dataset.chatgptSearchMessageIds = "native-user-2";
+    expect(a.read()?.id).toBe(first.id);
+    expect(a.read()?.messages[0]?.id).not.toBe(first.messages[0]?.id);
+    document.querySelector<HTMLElement>(
+      "[data-chatgpt-conversation-selection-target]",
+    )!.dataset.chatgptConversationSelectionTarget = "another-conversation";
+    expect(a.read()?.id).not.toBe(first.id);
+  });
+  it("never treats unkeyed alternating divs as messages", () => {
+    document.body.innerHTML =
+      "<main><div>user question</div><div>assistant answer</div></main>";
+    const a = new ChatGPTAdapter(
+      document,
+      () => new URL("https://chatgpt.com/?temporary-chat=true"),
+    );
+    expect(a.read()).toBe(null);
+    expect(a.diagnose().reason).toBe("message-markers-missing");
+  });
+  it("merges older remounted turns before known anchors without dropping virtualized history", async () => {
+    const r = new StorageRepository(crypto.randomUUID());
+    await r.authorize();
+    await r.setAutoCapture(true);
+    const a = modernFixture();
+    const old = a.read()!;
+    const latest = {
+      ...old,
+      messages: old.messages.map((m) => ({
+        ...m,
+        id: m.id + "-later",
+        text: m.text + " later",
+        updatedAt: m.updatedAt + 10,
+      })),
+    };
+    await r.capture(latest);
+    await r.capture({
+      ...old,
+      messages: [...old.messages, ...latest.messages].map((m, order) => ({
+        ...m,
+        order,
+      })),
+    });
+    expect((await r.get(old.id))?.messages.map((m) => m.id)).toEqual(
+      [...old.messages, ...latest.messages].map((m) => m.id),
+    );
+    await r.capture(latest);
+    expect((await r.get(old.id))?.messages).toHaveLength(4);
+  });
+});

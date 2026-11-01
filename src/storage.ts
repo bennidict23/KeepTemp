@@ -64,18 +64,30 @@ export class StorageRepository {
       return false;
     }
     const messages = new Map(old?.messages.map((m) => [m.id, m]));
-    let nextOrder =
-      Math.max(-1, ...[...messages.values()].map((m) => m.order)) + 1;
-    for (const m of [...snapshot.messages].sort((a, b) => a.order - b.order)) {
+    const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
+    const ordered = [...messages.values()]
+      .sort((a, b) => a.order - b.order)
+      .map((m) => m.id);
+    for (let i = 0; i < incoming.length; i++) {
+      const m = incoming[i]!;
       const previous = messages.get(m.id);
+      if (!previous) {
+        // Older virtualized turns may be prepended when the user scrolls back.
+        const next = incoming.slice(i + 1).find((n) => ordered.includes(n.id));
+        const prev = [...incoming.slice(0, i)]
+          .reverse()
+          .find((n) => ordered.includes(n.id));
+        if (next) ordered.splice(ordered.indexOf(next.id), 0, m.id);
+        else if (prev) ordered.splice(ordered.indexOf(prev.id) + 1, 0, m.id);
+        else ordered.push(m.id);
+      }
       if (!previous || m.updatedAt >= previous.updatedAt)
         messages.set(m.id, {
           ...m,
-          order: previous?.order ?? nextOrder++,
           createdAt: previous?.createdAt ?? m.createdAt,
         });
     }
-    const all = [...messages.values()].sort((a, b) => a.order - b.order);
+    const all = ordered.map((id, order) => ({ ...messages.get(id)!, order }));
     const now = Date.now();
     await store.put({
       id: snapshot.id,
