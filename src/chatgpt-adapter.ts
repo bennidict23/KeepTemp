@@ -1,6 +1,6 @@
 import type { Message, PlatformAdapter, Snapshot } from "./model";
 
-function visible(el: HTMLElement) {
+export function visible(el: HTMLElement) {
   if (el.closest('[hidden],[aria-hidden="true"]')) return false;
   for (let node: HTMLElement | null = el; node; node = node.parentElement) {
     const style = node.ownerDocument.defaultView?.getComputedStyle(node);
@@ -157,6 +157,9 @@ export function messageText(el: HTMLElement): string {
     el.querySelector<HTMLElement>(
       '[data-user-message-bubble="true"],[data-markdown-text-style="assistant-message"],.markdown,.whitespace-pre-wrap,[data-message-content]',
     ) ?? el;
+  return plainText(content);
+}
+export function plainText(content: HTMLElement) {
   const clone = content.cloneNode(true) as HTMLElement;
   clone
     .querySelectorAll(

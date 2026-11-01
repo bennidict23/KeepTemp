@@ -1,3 +1,10 @@
+import {
+  PLATFORMS,
+  captureKey,
+  isPlatform,
+  platformName,
+  type PlatformId,
+} from "./platforms";
 import { openDB, type DBSchema } from "idb";
 import type { Session, Snapshot } from "./model";
 interface Schema extends DBSchema {
@@ -17,11 +24,25 @@ export class StorageRepository {
   async consent() {
     return (await this.db).get("meta", "consent").then(Boolean);
   }
-  async autoCapture() {
-    return Boolean(await (await this.db).get("meta", "chatgpt-consent"));
+  async autoCapture(source?: PlatformId) {
+    const db = await this.db;
+    if (source) return Boolean(await db.get("meta", captureKey(source)));
+    return (await this.enabledPlatforms()).length > 0;
   }
-  async setAutoCapture(enabled: boolean) {
-    await (await this.db).put("meta", enabled, "chatgpt-consent");
+  async enabledPlatforms() {
+    const db = await this.db;
+    const values = await Promise.all(
+      PLATFORMS.map((p) => db.get("meta", captureKey(p.id))),
+    );
+    return PLATFORMS.filter((_p, i) => values[i]).map((p) => p.id);
+  }
+  async setAutoCapture(enabled: boolean, source?: PlatformId) {
+    const db = await this.db;
+    const tx = db.transaction("meta", "readwrite");
+    for (const p of PLATFORMS)
+      if (!source || p.id === source)
+        await tx.store.put(enabled, captureKey(p.id));
+    await tx.done;
   }
   async authorize() {
     await (await this.db).put("meta", true, "consent");
@@ -52,9 +73,9 @@ export class StorageRepository {
         return false;
       }
       if (
-        snapshot.source === "chatgpt" &&
+        isPlatform(snapshot.source) &&
         !enableCapture &&
-        !(await tx.objectStore("meta").get("chatgpt-consent"))
+        !(await tx.objectStore("meta").get(captureKey(snapshot.source)))
       ) {
         await tx.done;
         return false;
@@ -65,8 +86,8 @@ export class StorageRepository {
         await tx.done;
         return false;
       }
-      if (enableCapture && snapshot.source === "chatgpt")
-        await tx.objectStore("meta").put(true, "chatgpt-consent");
+      if (enableCapture && isPlatform(snapshot.source))
+        await tx.objectStore("meta").put(true, captureKey(snapshot.source));
       const messages = new Map(old?.messages.map((m) => [m.id, m]));
       const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
       const ordered = [...messages.values()]
@@ -101,8 +122,8 @@ export class StorageRepository {
         title:
           old?.title ??
           (all[0]?.text.slice(0, 70) ||
-            (snapshot.source === "chatgpt"
-              ? "ChatGPT Temporary Chat"
+            (isPlatform(snapshot.source)
+              ? `${platformName(snapshot.source)} Temporary Chat`
               : "Synthetic chat")),
         createdAt: old?.createdAt ?? now,
         updatedAt: now,

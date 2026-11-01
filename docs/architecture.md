@@ -1,41 +1,43 @@
 # KeepTemp 架构
 
-Chrome MV3 / WXT / TypeScript / React / IndexedDB。运行时只有内容脚本、扩展后台和 Side Panel；不包含开发测试页面。
+Chrome MV3 / WXT / TypeScript / React / IndexedDB。运行时只有内容脚本、后台和 Side Panel，不含开发测试页面。
 
 ## 捕获链路
 
-`ChatGPTAdapter` 只负责网页差异，返回平台无关的 Snapshot。支持旧角色标记，以及新 app-shell 的语义搜索单元、活动时间线和原生 turn key；不通过视觉位置交替猜角色。Temporary 识别不确定或稳定身份不足时拒绝捕获。
+`PlatformAdapter` 负责网页差异，返回平台无关的 Snapshot。`src/platforms.ts` 集中定义精确 origin、来源 ID、新会话链接和实验标记。工厂按 origin 选择适配器；模式不确定、角色或身份不可靠时拒绝捕获，不按视觉位置或奇偶猜角色。
 
-内容脚本负责监听、合并扫描、去重、状态与暂停操作。每 350ms 至多处理一轮；指纹不包含扫描时间，避免无改动重复写入。网页只显示小状态标记，操作折叠，不展示诊断或开发信息。
+ChatGPT 保留已验收的新旧布局支持：角色标记、语义搜索单元、活动时间线、原生 turn key 和 conversation selection target。Claude 使用 transcript-row 的 human / assistant、会话 URL 与绝对行号；根地址没有原生消息 ID 而只有行号时拒绝。Grok 使用 Private 信号、原生 response ID 和显式角色或用户／助手结构类。Gemini 使用 Temporary header、conversation-container 原生 ID 和 user-query / model-response。三家新增适配为实验支持，证据和限制见 layout-compatibility.md。
 
-真实页面不能直接访问扩展 IndexedDB，因此通过 runtime 消息 → MV3 后台 → `StorageRepository`。后台验证精确 origin、扩展 id、顶层 frame、tab id 以及有大小上限的快照。事务完成才返回 saved；失败重试且不虚报保存成功。
+内容脚本监听变化，每 350ms 至多处理一轮；指纹不含扫描时间，流式回复更新原消息。网页只显示小状态标记，操作折叠。只有授权后才读取聊天快照；主动记录先确认隐私模式。
+
+内容脚本通过 runtime 消息发给 MV3 后台，后台调用 StorageRepository。后台验证扩展 id、精确 origin、顶层 frame、tab id 和有大小上限的 schema。**平台从 sender origin 决定，不信任快照自报来源。**事务完成才返回 saved；失败重试且不虚报成功。
 
 ## 数据与一致性
 
-IndexedDB meta.consent 是本地授权，meta.chatgpt-consent 是网站自动捕获授权；事务同时检查，关闭授权后不再写入。后台重启后从持久化数据库恢复状态。
+IndexedDB meta.consent 是本地授权。原 ChatGPT 的 meta.chatgpt-consent 键保留，新增平台使用 capture:<platform> 独立布尔键，默认关闭。主页总开关明确启用／关闭四家；主动记录成功只启用当前平台。写入事务同时检查授权、暂停和排除，后台重启后从数据库恢复状态。
 
-新版会话键由 tab id 与原生 conversation selection target 组成；无该标记时回退首条用户原生消息/turn id。消息按 role + native turn key 区分。这样同一轮用户和助手各自更新，外内双层搜索包装不重复。从 / 跳到 /c 不依赖 URL 路径拆会话；不同标签页独立。
+会话存储键为平台 + tab id + 适配器会话 ID；旧 ChatGPT 键不变。不同平台和标签页独立。ChatGPT 优先原生 conversation selection target，否则首条用户原生消息／turn id，不因根路径变 /c 路径拆分。其他三家优先原生会话 URL；根地址以原生消息锚定，有共同锚点才连续保存，无共同锚点宁可分段，避免误合并。完全不重叠的虚拟窗口、根地址重载或后来获得原生会话 URL 仍可能分段。
 
-单会话原子写入，保留首个观察时间，拒绝更老的消息更新。页面虚拟化卸载的记录不会被删除。新出现的旧片段按快照内已知前后锚点插入；完全没有共同锚点时不能保证未知历史的绝对位置。不滚动补抓，不使用平台 API。
+消息键基于 role + 原生消息／turn key。单会话原子写入，保留首次观察时间，拒绝旧更新。虚拟化移除的已保存消息保留；新发现的旧片段按共同前后锚点插入。无共同锚点时无法保证未知历史绝对位置。不自动滚动，不使用平台 API 补抓。
 
-暂停存储在 Session.paused；排除与删除使用标记或无内容 tombstone，阻止活跃页面重新捕获。全部清空在一个事务内移除内容与授权。旧版本数据库格式兼容，不清理用户已有记录。
+暂停保存在 Session.paused。排除／删除使用标记或无内容 tombstone 阻止活跃页面回写。全部清空在一个事务内移除内容和授权。旧数据库兼容，升级不清理已有记录。
 
 ## 会话库与接续
 
-Side Panel 读取扩展数据库，以本地轮询观察跨页提交；全文搜索覆盖标题与消息。选中会话不受搜索过滤结果影响，返回列表恢复滚动位置。列表会话菜单提供重命名和删除；重命名在事务中更新标题，不改变消息或最后聊天时间，后续自动捕获保留自定义标题。React 纯文本插值展示记录，不执行保存内容。
+Side Panel 本地轮询数据库观察跨页提交；搜索覆盖标题与全文，选中会话独立于搜索过滤，返回恢复列表滚动位置。列表“⋯”重命名／删除；重命名事务不改消息或聊天活动时间，后续捕获保留自定义标题。React 按纯文本展示，不执行保存内容。
 
-`RecoveryFormatter` 的 transcript 保留角色和原文字，context 在其外层附加固定接续提示词，并选用不会与正文冲突的边界。提示词要求新模型沿用目标、约束、结论和偏好，从未完成处继续，不重复开场或已完成回答。Markdown 与版本化 JSON 导出保持原记录，不附带提示词。复制由点击触发；不自动输入或发送消息。
+RecoveryFormatter 的 transcript 保留角色与原文字；context 在外层附固定接续提示词和不冲突的边界，要求新模型承接目标、约束、结论、偏好与未完成请求，不重复开场和已完成回答。来源标签只用于会话库和导出，提示词保持平台中立。Markdown 和版本化 JSON 保持原记录，不附带接续提示词。
 
-## 权限与限制
-
-API 权限为 sidePanel 和 scripting；声明式与手动补加载脚本的 host 权限都精确限定 https://chatgpt.com/*。无 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage 权限。生产扩展 CSP connect-src none，不引入远程代码或字体。
-
-已知限制：DOM 和 Temporary 信号依赖平台布局；未观察历史、附件、隐藏状态不保存；立即关闭可能丢失未提交尾部；跨浏览器重启 tab id 不保证稳定；不提供分支版本历史；全文搜索适合小库；长上下文只做字符启发提醒；数据库未加密且不替代备份。
+接续平台下拉只改变打开链接。复制由用户点击触发，之后用户自行在新临时／隐身会话粘贴发送。不自动切换平台模式、不自动输入、不发送、不调用 AI。存储、搜索和恢复不依赖平台 DOM。
 
 ## 中途接管
 
-Side Panel 的 current-chat 控制器只查询当前窗口的活动标签页，验证精确 origin，排除共享链接，不退而挑选其他聊天。先 ping 已存在脚本，只有接收器缺失时才通过 scripting 注入打包的同一脚本。页面 URL、DOM 和对话不重建。
+current-chat 控制器只查询当前窗口的活动标签页，验证精确 origin，排除共享链接，不挑选其他聊天。先 ping 接收器，缺失时才通过 scripting 补加载同一内容脚本，URL 和 DOM 不重建。
 
-内容脚本只接受同一扩展页面发出的 inspect/record 控制消息。inspect 仅确认临时模式；record 抽取当前快照，再向后台发 start-current。后台仍验证顶层来源、数据 schema 与本地授权。StorageRepository 在同一个事务内检查 paused/tombstone，然后保存快照并开启自动捕获；失败主动 abort，避免只开启授权却没保存。被暂停、排除或删除的会话不会重建。
+内容脚本只接受同一扩展页面发出的 inspect / record。inspect 只确认模式；record 抽取快照并发 start-current。后台验证来源、schema 和本地授权。StorageRepository 在一个事务内检查暂停／tombstone、保存快照和开启当前平台自动捕获；失败主动 abort，避免只开启未保存。暂停、排除、删除不会重建。后续复用同一身份和去重，重复接管不增加浮层或会话。
 
-后续轮询复用同一身份和去重逻辑。重复接管不会再注入一个状态浮层或建立另一会话。内容脚本只处理页面已挂载文字，不承诺补全此前已虚拟化移除的消息。
+## 权限与边界
+
+API 权限 sidePanel、scripting；host 和内容脚本仅四个 HTTPS origin：chatgpt.com、claude.ai、grok.com、gemini.google.com。不含 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage。CSP connect-src none，不加载远程代码、字体或分析 SDK。
+
+DOM 和模式信号依赖平台布局，三家新增适配尚待真实账号验收。未观察历史、附件、隐藏状态不保存；立即关闭可能丢未提交尾部；跨浏览器重启 tab id 不保证稳定；无分支版本历史；全文搜索适合小库；长上下文仅字符启发；数据库未加密、不替代备份。技术可行不代表采集许可已确认。

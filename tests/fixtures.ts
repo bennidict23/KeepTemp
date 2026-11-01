@@ -8,3 +8,38 @@ export function turn(
 export function shell(content = turn(), id = "synthetic-conversation") {
   return `<!doctype html><html><head><meta charset="UTF-8"></head><body><main><div role="region" data-app-action-timeline-scroll><div data-chatgpt-conversation-selection-target="${id}" data-thread-find-target="conversation">${content}</div></div><div role="presentation"><div data-content-search-unit-key="hidden:0:user">hidden synthetic branch</div></div></main></body></html>`;
 }
+
+// Synthetic provider layouts: never sourced from a user's conversations.
+export const otherProviders = ["claude", "grok", "gemini"] as const;
+export function providerFixture(source: (typeof otherProviders)[number]) {
+  const header =
+    source === "claude"
+      ? "<header><span>Incognito chat</span></header>"
+      : source === "grok"
+        ? "<header><span>Private chat</span></header>"
+        : "<header><temporary-chat-header>Temporary chat</temporary-chat-header></header>";
+  const body =
+    source === "claude"
+      ? '<div data-testid="transcript-row" data-perf-row="human" data-index="0"><div data-testid="user-message">合成问题</div></div><div data-testid="transcript-row" data-perf-row="assistant" data-index="1"><div data-testid="assistant-message"><div class="prose"><p data-stream>合成回复</p><p>保留第二段</p></div><button>复制</button></div></div>'
+      : source === "grok"
+        ? '<div id="response-user-native" class="items-end"><div class="message-bubble user">合成问题</div></div><div id="response-answer-native" class="items-start"><div class="message-bubble"><div class="response-content-markdown"><p data-stream>合成回复</p><p>保留第二段</p></div><button>复制</button></div></div>'
+        : '<div class="conversation-container" id="turn-native"><user-query><div class="query-text"><span class="cdk-visually-hidden">You said</span>合成问题<prompt-copy-button>复制</prompt-copy-button></div></user-query><model-response><div class="model-response-text"><p data-stream>合成回复</p><p>保留第二段</p><div class="response-footer">反馈</div></div></model-response></div>';
+  const origin =
+    source === "claude"
+      ? "https://claude.ai"
+      : source === "grok"
+        ? "https://grok.com"
+        : "https://gemini.google.com";
+  const path =
+    source === "claude"
+      ? "/chat/synthetic"
+      : source === "grok"
+        ? "/c/synthetic"
+        : "/app/synthetic";
+  return {
+    origin,
+    path,
+    url: origin + path,
+    html: `<!doctype html><html><head><meta charset="UTF-8"></head><body>${header}<main>${body}</main></body></html>`,
+  };
+}

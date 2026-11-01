@@ -1,3 +1,4 @@
+import { platformFromUrl } from "./platforms";
 import { browser } from "wxt/browser";
 import type { BridgeResponse } from "./bridge";
 import type { StorageRepository } from "./storage";
@@ -9,13 +10,14 @@ export class CurrentChatError extends Error {
 export function currentChatError(error: unknown) {
   const code = error instanceof CurrentChatError ? error.code : "";
   const messages: Record<string, string> = {
-    "not-chatgpt": "请先切换到你正在聊天的 ChatGPT 标签页，再打开 KeepTemp。",
+    "not-chatgpt":
+      "请先切换到 ChatGPT、Claude、Grok 或 Gemini 的聊天标签页，再打开 KeepTemp。",
     "consent-required": "请先同意本地保存，再记录当前会话。",
     "site-access":
-      "无法访问当前页面。请在扩展设置中允许访问 chatgpt.com；无需刷新或关闭聊天。",
+      "无法访问当前页面。请在扩展设置中允许访问当前平台的网站；无需刷新或关闭聊天。",
     regular: "当前页面不是临时聊天，未保存。",
     "temporary-unknown":
-      "暂未识别出临时模式，未保存。请确认 ChatGPT 显示 Temporary／临时聊天。",
+      "暂未识别出临时模式，未保存。请确认网页显示临时、隐身或私密聊天。",
     "no-content":
       "未找到可保存的对话文字。请确认已有消息；若仍失败，请保留当前页面。",
     paused: "此会话已暂停。请从网页上的 KeepTemp 菜单恢复后重试。",
@@ -32,10 +34,7 @@ export async function recordCurrentChat(
   if (tab?.id === undefined || !tab.url)
     throw new CurrentChatError("not-chatgpt");
   const url = new URL(tab.url);
-  if (
-    url.origin !== "https://chatgpt.com" ||
-    url.pathname.startsWith("/share/")
-  )
+  if (!platformFromUrl(url) || url.pathname.startsWith("/share/"))
     throw new CurrentChatError("not-chatgpt");
   const tabId = tab.id;
   const send = (type: string) =>

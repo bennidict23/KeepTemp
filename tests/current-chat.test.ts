@@ -1,4 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
+import { PLATFORMS } from "../src/platforms";
 const api = vi.hoisted(() => ({
   tabs: { query: vi.fn(), sendMessage: vi.fn() },
   scripting: { executeScript: vi.fn() },
@@ -24,6 +25,17 @@ beforeEach(() => {
 });
 const repo = () => ({ consent: vi.fn().mockResolvedValue(true) });
 describe("start recording an existing chat", () => {
+  it.each(PLATFORMS)("accepts the selected $name origin", async (platform) => {
+    api.tabs.query.mockResolvedValue([{ id: 17, url: platform.url }]);
+    await recordCurrentChat(repo());
+    expect(api.tabs.query).toHaveBeenCalledWith({
+      active: true,
+      currentWindow: true,
+    });
+    expect(api.tabs.sendMessage).toHaveBeenCalledWith(17, {
+      type: "keeptemp:record-current",
+    });
+  });
   it("records an already running page without navigation or reinjection", async () => {
     await recordCurrentChat(repo());
     expect(api.scripting.executeScript).not.toHaveBeenCalled();
@@ -114,7 +126,7 @@ describe("start recording an existing chat", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(CurrentChatError);
-    expect(currentChatError(caught)).toContain("允许访问 chatgpt.com");
+    expect(currentChatError(caught)).toContain("允许访问当前平台的网站");
     expect(currentChatError(caught)).not.toContain("private");
   });
 });

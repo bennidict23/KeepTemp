@@ -16,8 +16,24 @@
 
 ## Chrome 与发布
 
-[Side Panel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel) 需要 sidePanel 权限；页面读取通过 chatgpt.com 限定内容脚本。中途接管使用 [scripting](https://developer.chrome.com/docs/extensions/reference/api/scripting) 给已打开页面补加载脚本，需 scripting 与 chatgpt.com 的精确 host 权限。[商店用户数据要求](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq) 同样适用于只在本地处理数据的扩展。项目尚未上架，正式发布前应复核条款、发布可访问隐私政策并准确披露数据用途。
+[Side Panel](https://developer.chrome.com/docs/extensions/reference/api/sidePanel) 需要 sidePanel 权限；页面读取通过四个精确站点限定的内容脚本。中途接管使用 [scripting](https://developer.chrome.com/docs/extensions/reference/api/scripting) 给已打开页面补加载脚本，需 scripting 与目标平台的精确 host 权限。[商店用户数据要求](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq) 同样适用于只在本地处理数据的扩展。项目尚未上架，正式发布前应复核条款、发布可访问隐私政策并准确披露数据用途。
 
 [TCX Temporary Chat Saver](https://chromewebstore.google.com/detail/tcx-temporary-chat-saver/cgjidpkaabokdjlfaakggpdopmieijle) 也声明提供本地保存，因此不宣称首创。KeepTemp 的产品取舍是无感自动保存、最少控制、本地可找回、真实提交状态及可审计边界。
 
 具体网页选择器存在变化风险，见 [布局记录](layout-compatibility.md)。数据没有应用层加密，也没有自动备份。完整恢复服务器会话、附件、工具状态或未观察历史不在当前能力内。
+
+## 0.4.0：用户明确扩展到四个平台
+
+用户要求支持 Claude、Grok、Gemini 与跨平台接续。接续是完整角色文字加本地固定提示词，选择目标平台仅改变打开入口，不调用目标 API，也不要求原平台配合。来源保存在 UI 和导出记录中，不写入接续提示词。
+
+新增捕获沿用 DOM → 后台 → IndexedDB，只读取挂载文字，保守识别 Temporary／Incognito／Private。三家均为实验支持，只有合成测试，不能宣称真实账号可用。共享账号是否允许、采集和公开发布是否获准仍需分别确认；未获得三家对本扩展的授权，不以第三方 DOM 资料作为许可证明。
+
+平台功能参考：
+
+- [Claude Incognito 官方说明](https://support.claude.com/en/articles/12260368-use-incognito-chats)：隐身聊天与普通历史区分。入口只打开 /new，用户须自行开启隐身模式；没有平台承诺稳定的 DOM 接口。
+- [Gemini 官方临时聊天说明](https://support.google.com/gemini/answer/13275745?hl=en)：临时模式需主动开启，账号可用性不同。[Gemini 隐私说明](https://support.google.com/gemini/answer/13594961) 介绍临时聊天平台端保留；不因为本地保存改变这些规则。
+- [Grok 官方 FAQ](https://x.ai/legal/faq) 与 [产品 FAQ](https://docs.x.ai/grok/faq)：Private Chat 与普通历史有区别。本扩展只适配 grok.com，不适配 X 内嵌界面。
+
+新增权限仅为三个精确 HTTPS 站点，仍无 cookies、请求拦截、凭据访问或平台 API。原 ChatGPT 授权保留；升级不会自动开启其他平台。主页总开关明确开启四家，主动记录仅开启当前平台。Claude／Gemini 新会话入口不自动保证隐私模式，界面要求用户发送前确认。
+
+工程判断：跨平台文字接续可直接实现；自动保存取决于模式信号、稳定消息身份和挂载范围。Claude 根地址只有虚拟行号时不保存；无共同原生锚点时拆分而非冒险混淆。更多布局依据见 [页面布局记录](layout-compatibility.md)。

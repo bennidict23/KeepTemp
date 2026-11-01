@@ -1,3 +1,4 @@
+import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
 import { StorageRepository } from "../src/storage";
 import {
@@ -26,17 +27,19 @@ export default defineBackground(() => {
         sender.tab?.id === undefined ||
         sender.frameId !== 0 ||
         !sender.url ||
-        new URL(sender.url).origin !== "https://chatgpt.com"
+        !platformFromUrl(sender.url)
       ) {
         sendResponse({ ok: false, error: "invalid-source" });
         return false;
       }
       const tabId = sender.tab.id;
+      const platform = platformFromUrl(sender.url)!.id;
       const data = request as Record<string, unknown>;
       // Keep the channel alive on Chrome versions without Promise-returning listeners.
       void (async (): Promise<BridgeResponse> => {
         try {
-          const consent = (await repo.consent()) && (await repo.autoCapture());
+          const consent =
+            (await repo.consent()) && (await repo.autoCapture(platform));
           if (data.type === "keeptemp:start-current") {
             if (!(await repo.consent()))
               return { ok: false, error: "consent-required" };
@@ -44,8 +47,8 @@ export default defineBackground(() => {
               return { ok: false, error: "unsupported-data" };
             const snapshot = {
               ...data.snapshot,
-              id: scopedChatId(tabId, data.snapshot.id),
-              source: "chatgpt" as const,
+              id: scopedChatId(tabId, data.snapshot.id, platform),
+              source: platform,
             };
             const saved = await repo.capture(snapshot, true);
             if (!saved) {
@@ -68,8 +71,8 @@ export default defineBackground(() => {
             const snapshot = data.snapshot;
             const saved = await repo.capture({
               ...snapshot,
-              id: scopedChatId(tabId, snapshot.id),
-              source: "chatgpt",
+              id: scopedChatId(tabId, snapshot.id, platform),
+              source: platform,
             });
             return { ok: true, consent: true, saved };
           }
@@ -77,7 +80,7 @@ export default defineBackground(() => {
             typeof data.id === "string" &&
             data.id.startsWith("thread:") &&
             data.id.length <= 600
-              ? scopedChatId(tabId, data.id)
+              ? scopedChatId(tabId, data.id, platform)
               : null;
           if (data.type === "keeptemp:exclude" && id) await repo.delete(id); // content-free permanent exclusion, including before first write
           if (

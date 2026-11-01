@@ -607,3 +607,32 @@ summary {
   text-align: center;
   margin-top: 6px;
 }
+
+.platform-select {
+  font: inherit;
+  font-size: 12px;
+  padding: 9px 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--ink);
+  min-width: 0;
+  max-width: 110px;
+  outline-color: #578650;
+  cursor: pointer;
+}
+.new-chat-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 14px 0 20px;
+}
+.new-chat-row .new-chat {
+  flex: 1;
+  margin: 0;
+}
+.platform-hint {
+  margin: -12px 0 14px;
+  text-align: center;
+  font-size: 10px;
+}

@@ -8,7 +8,7 @@ import {
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { shell, turn } from "../fixtures";
+import { shell, turn, otherProviders, providerFixture } from "../fixtures";
 let browser: BrowserContext, base: string, profile: string, panel: Page;
 test.beforeAll(async () => {
   profile = await fs.mkdtemp(path.join(os.tmpdir(), "keeptemp-"));
@@ -36,7 +36,7 @@ test.beforeEach(async () => {
   await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
 });
 async function enable() {
-  await panel.getByRole("button", { name: "启用 ChatGPT 自动保存" }).click();
+  await panel.getByRole("button", { name: "启用自动保存" }).click();
 }
 async function chat() {
   const p = await browser.newPage();
@@ -77,6 +77,8 @@ test.afterEach(async () => {
   }
   for (const p of browser.pages()) await p.close();
   await browser.unroute("https://chatgpt.com/**");
+  for (const source of otherProviders)
+    await browser.unroute(providerFixture(source).origin + "/**");
 });
 test.afterAll(async () => {
   await browser?.close();
@@ -294,7 +296,7 @@ test("minimal library fits narrow light and dark panels without development tool
   expect(box!.height).toBeGreaterThanOrEqual(40);
   expect(box!.y + box!.height).toBeLessThanOrEqual(900);
   await expect(
-    panel.getByRole("link", { name: "新临时会话 ↗" }),
+    panel.getByRole("link", { name: "打开 ChatGPT" }),
   ).toHaveAttribute("href", "https://chatgpt.com/?temporary-chat=true");
   await back.click();
   await expect(panel.getByRole("searchbox")).toBeVisible();
@@ -302,10 +304,15 @@ test("minimal library fits narrow light and dark panels without development tool
     await fs.readFile(".output/chrome-mv3/manifest.json", "utf8"),
   );
   expect(manifest.permissions).toEqual(["sidePanel", "scripting"]);
-  expect(manifest.host_permissions).toEqual(["https://chatgpt.com/*"]);
-  expect(manifest.content_scripts[0].matches).toEqual([
+  expect(manifest.host_permissions).toEqual([
     "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://grok.com/*",
+    "https://gemini.google.com/*",
   ]);
+  expect([...manifest.content_scripts[0].matches].sort()).toEqual(
+    [...manifest.host_permissions].sort(),
+  );
 });
 
 test("homepage ellipsis menu renames and deletes without opening the conversation", async () => {
@@ -457,4 +464,168 @@ test("hot-attaches when the old content script is absent without reloading the c
     await p.evaluate(() => document.documentElement.dataset.sameDocument),
   ).toBe("preserved");
   expect(await p.locator("#keeptemp-status").count()).toBe(1);
+});
+
+for (const source of otherProviders) {
+  test(`${source}: synthetic automatic capture streams, persists and refuses ordinary mode`, async () => {
+    const fixture = providerFixture(source);
+    await browser.route(fixture.origin + "/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: fixture.html,
+      }),
+    );
+    await enable();
+    const p = await browser.newPage();
+    await p.goto(fixture.url);
+    const status = p.locator("#keeptemp-status").getByRole("status");
+    await expect(status).toContainText("Saved");
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.locator(".session").click();
+    await expect(panel.locator(".meta")).toContainText(
+      source === "claude" ? "Claude" : source === "grok" ? "Grok" : "Gemini",
+    );
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    await expect(panel.locator(".messages")).toContainText("保留第二段");
+    await expect(panel.locator(".messages")).not.toContainText("You said");
+    await p.evaluate(async () => {
+      for (let i = 0; i < 25; i++) {
+        document.querySelector("[data-stream]")!.textContent = `合成流式 ${i}`;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    });
+    await expect(panel.locator(".messages")).toContainText("合成流式 24");
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    await p.reload();
+    await expect(status).toContainText("Saved");
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    // No status inference from transcript text or a button offering to enable privacy.
+    await p.evaluate(() => document.querySelector("header")!.remove());
+    await expect(status).toContainText("等待临时对话");
+    await p.evaluate(
+      () =>
+        (document.querySelector("[data-stream]")!.textContent =
+          "ordinary text must not save"),
+    );
+    await expect(panel.locator(".messages")).not.toContainText(
+      "ordinary text must not save",
+    );
+    await p.close();
+    await panel.reload();
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.locator(".session").click();
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+  });
+}
+
+test("four platform origins stay independent; cross-platform handoff remains neutral and exact", async () => {
+  await panel.setViewportSize({ width: 340, height: 900 });
+  await enable();
+  const gpt = await chat();
+  await expect(
+    gpt.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("Saved");
+  for (const source of otherProviders) {
+    const fixture = providerFixture(source);
+    await browser.route(fixture.origin + "/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: fixture.html,
+      }),
+    );
+    const p = await browser.newPage();
+    await p.goto(fixture.url);
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText("Saved");
+  }
+  await expect(panel.locator(".session")).toHaveCount(4);
+  await panel.screenshot({
+    path: "docs/multiplatform-preview.png",
+    fullPage: true,
+  });
+  await panel
+    .locator(".session")
+    .filter({ has: panel.locator(".session-meta", { hasText: "ChatGPT" }) })
+    .click();
+  await panel
+    .getByRole("combobox", { name: "接续平台" })
+    .selectOption("claude");
+  await expect(
+    panel.getByRole("link", { name: "打开 Claude" }),
+  ).toHaveAttribute("href", "https://claude.ai/new");
+  await panel.getByRole("button", { name: "复制并接续" }).click();
+  const copied = await panel.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain(
+    "[user]\n把临时对话留在手中\n\n[assistant]\n从一个小而可靠的本地工具开始。",
+  );
+  for (const brand of ["ChatGPT", "Claude", "Grok", "Gemini"])
+    expect(copied).not.toContain(brand);
+  await expect(panel.locator(".meta")).toContainText("ChatGPT");
+  await panel.screenshot({
+    path: "docs/cross-platform-preview.png",
+    fullPage: true,
+  });
+  await panel
+    .getByRole("combobox", { name: "接续平台" })
+    .selectOption("gemini");
+  await expect(
+    panel.getByRole("link", { name: "打开 Gemini" }),
+  ).toHaveAttribute("href", "https://gemini.google.com/app");
+  await panel.getByRole("button", { name: "返回", exact: true }).click();
+  await panel
+    .getByRole("combobox", { name: "新会话平台" })
+    .selectOption("grok");
+  await expect(panel.getByRole("link", { name: /打开 Grok/ })).toHaveAttribute(
+    "href",
+    "https://grok.com/chat#private",
+  );
+  const pages = browser.pages().length;
+  expect(pages).toBe(5); // Selecting a target and copying never opens, pastes or sends automatically.
+});
+
+test("recording the current Claude chat only enables Claude and preserves the existing page", async () => {
+  for (const source of ["claude", "gemini"] as const) {
+    const fixture = providerFixture(source);
+    await browser.route(fixture.origin + "/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: fixture.html,
+      }),
+    );
+  }
+  const p = await browser.newPage();
+  await p.goto(providerFixture("claude").url);
+  await p.evaluate(
+    () => (document.documentElement.dataset.preserve = "existing-document"),
+  );
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "尚未授权",
+  );
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前临时会话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "已保存当前可读取的内容",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".capture-strip small")).toHaveText(
+    "Claude 已启用",
+  );
+  expect(
+    await p.evaluate(() => document.documentElement.dataset.preserve),
+  ).toBe("existing-document");
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  const second = await browser.newPage();
+  await second.goto(providerFixture("gemini").url);
+  await expect(
+    second.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("尚未授权");
+  await expect(panel.locator(".session")).toHaveCount(1);
 });

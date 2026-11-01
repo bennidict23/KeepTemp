@@ -1,3 +1,9 @@
+import {
+  PLATFORMS,
+  platformName,
+  isPlatform,
+  type PlatformId,
+} from "../../src/platforms";
 import { browser } from "wxt/browser";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -31,6 +37,9 @@ function App() {
     [notice, setNotice] = useState(""),
     [failed, setFailed] = useState(false),
     [copied, setCopied] = useState(false);
+  const [destination, setDestination] = useState<PlatformId>("chatgpt");
+  const [enabledOn, setEnabledOn] = useState<PlatformId[]>([]);
+  const target = PLATFORMS.find((p) => p.id === destination)!;
   const [menuId, setMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -72,12 +81,14 @@ function App() {
       repo.autoCapture(),
       repo.list(),
     ]);
-    return { c, e, s };
+    const platforms = await repo.enabledPlatforms();
+    return { c, e, s, platforms };
   }
   function apply(data: Awaited<ReturnType<typeof load>>) {
     setConsent(data.c);
     setEnabled(data.e);
     setSessions(data.s);
+    setEnabledOn(data.platforms);
   }
   useEffect(() => {
     let active = true;
@@ -112,6 +123,8 @@ function App() {
   useEffect(() => {
     window.scrollTo(0, selected ? 0 : listScroll.current);
     setCopied(false);
+    const source = sessions.find((s) => s.id === selected)?.source;
+    if (isPlatform(source)) setDestination(source);
     setMenuId(null);
     setEditingId(null);
   }, [selected]);
@@ -205,8 +218,9 @@ function App() {
           <div className="card">
             <h3>开始之前</h3>
             <p>
-              只保存被识别为 Temporary 的可见对话文字，不上传，不需要账号或 API
-              Key。
+              只保存可识别的临时／隐身对话文字，支持
+              ChatGPT、Claude、Grok、Gemini。后三者为实验支持，仍需真实网页验证。不上传，不需要账号或
+              API Key。
             </p>
             <p>
               本地数据库未加密，不是密码保险库。卸载扩展或清理浏览器数据可能丢失记录，请按需导出。
@@ -224,7 +238,7 @@ function App() {
           >
             我了解并同意本地保存
           </button>
-          <small>同意后，再开启 ChatGPT 自动保存。</small>
+          <small>同意后，再开启自动保存。</small>
         </section>
       ) : current ? (
         <section className="conversation-view">
@@ -241,7 +255,8 @@ function App() {
             </button>
           </div>
           <div className="meta">
-            {dateLabel(current.updatedAt)} · {current.messages.length} 条消息
+            {platformName(current.source)} · {dateLabel(current.updatedAt)} ·{" "}
+            {current.messages.length} 条消息
             {current.excluded ? " · 已停止保存" : ""}
           </div>
           <h1>{current.title}</h1>
@@ -262,16 +277,34 @@ function App() {
             >
               {copied ? "已复制 ✓" : "复制并接续"}
             </button>
+            <select
+              className="platform-select"
+              aria-label="接续平台"
+              value={destination}
+              onChange={(e) => {
+                if (isPlatform(e.target.value)) setDestination(e.target.value);
+              }}
+            >
+              {PLATFORMS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
             <a
               className="button"
-              href="https://chatgpt.com/?temporary-chat=true"
+              href={target.url}
+              aria-label={`打开 ${target.name}`}
+              title={`打开 ${target.name}`}
               target="_blank"
               rel="noreferrer"
             >
-              新临时会话 ↗
+              打开 ↗
             </a>
           </div>
-          <small>已包含完整历史与接续提示词。在新临时会话中粘贴并发送。</small>
+          <small>
+            已包含完整历史与接续提示词。请在目标平台先开启临时／隐身模式，再粘贴发送。
+          </small>
           {longContext(current) && (
             <p className="notice">
               这段对话较长，可能超过所选模型的上下文容量。复制内容保持完整，不会自动截断。
@@ -281,7 +314,7 @@ function App() {
             {current.messages.map((m) => (
               <article key={m.id}>
                 <span className="eyebrow">
-                  {m.role === "user" ? "你" : "ChatGPT"}
+                  {m.role === "user" ? "你" : platformName(current.source)}
                 </span>
                 <p>{m.text}</p>
               </article>
@@ -327,15 +360,13 @@ function App() {
               <strong>{enabled ? "自动保存已开启" : "自动保存尚未开启"}</strong>
               <small>
                 {enabled
-                  ? "照常聊天，文字留在本机。"
+                  ? `${enabledOn.map(platformName).join("、")} 已启用`
                   : "只保存可识别的临时对话。"}
               </small>
             </div>
             <button
               className="toggle"
-              aria-label={
-                enabled ? "关闭 ChatGPT 自动保存" : "启用 ChatGPT 自动保存"
-              }
+              aria-label={enabled ? "关闭自动保存" : "启用自动保存"}
               disabled={busy}
               onClick={() =>
                 run(
@@ -365,14 +396,35 @@ function App() {
           <small className="record-hint">
             已经聊到一半？保存现有可读文字，并继续自动记录。
           </small>
-          <a
-            className="primary new-chat"
-            href="https://chatgpt.com/?temporary-chat=true"
-            target="_blank"
-            rel="noreferrer"
-          >
-            ＋ 新建临时聊天 <span aria-hidden="true">↗</span>
-          </a>
+          <div className="new-chat-row">
+            <select
+              className="platform-select"
+              aria-label="新会话平台"
+              value={destination}
+              onChange={(e) => {
+                if (isPlatform(e.target.value)) setDestination(e.target.value);
+              }}
+            >
+              {PLATFORMS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <a
+              className="primary new-chat"
+              href={target.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              ＋ 打开 {target.name} <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+          {destination !== "chatgpt" && (
+            <small className="platform-hint">
+              {target.name} 自动保存为实验支持；打开后请先开启临时／隐身模式。
+            </small>
+          )}
           <input
             aria-label="全文搜索"
             type="search"
@@ -446,7 +498,10 @@ function App() {
                         }}
                       >
                         <span className="session-meta">
-                          <span>{s.excluded ? "已停止保存" : "临时对话"}</span>
+                          <span>
+                            {platformName(s.source)}
+                            {s.excluded ? " · 已停止保存" : ""}
+                          </span>
                           <time
                             dateTime={new Date(s.updatedAt).toISOString()}
                             title={new Date(s.updatedAt).toLocaleString()}
@@ -561,7 +616,8 @@ function App() {
           <details className="tools">
             <summary>本地数据与隐私</summary>
             <p className="settings-note">
-              记录只在此浏览器中保存，没有云同步。数据库未加密，卸载扩展可能丢失数据。请在对话内导出需要备份的记录。
+              记录只在此浏览器中保存，没有云同步。Claude、Grok、Gemini
+              为实验适配，尚待真实账号验收。数据库未加密，卸载扩展可能丢失数据。请在对话内导出需要备份的记录。
             </p>
             <button
               className="danger link"

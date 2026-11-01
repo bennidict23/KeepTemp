@@ -1,3 +1,4 @@
+import type { PlatformId } from "./platforms";
 export type Role = "user" | "assistant";
 export interface Message {
   id: string;
@@ -9,7 +10,7 @@ export interface Message {
 }
 export interface Session {
   id: string;
-  source: "mock" | "manual" | "chatgpt";
+  source: "mock" | "manual" | PlatformId;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -19,12 +20,12 @@ export interface Session {
   deleted?: boolean;
 }
 export interface Snapshot {
-  source?: "mock" | "chatgpt";
+  source?: "mock" | PlatformId;
   id: string;
   temporary: boolean | null;
   messages: Message[];
 }
 export interface PlatformAdapter {
-  readonly source: "mock" | "chatgpt";
+  readonly source: "mock" | PlatformId;
   read(): Snapshot | null;
 }

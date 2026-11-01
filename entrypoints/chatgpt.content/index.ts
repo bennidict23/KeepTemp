@@ -1,11 +1,19 @@
 import { browser } from "wxt/browser";
-import { ChatGPTAdapter, temporaryMode } from "../../src/chatgpt-adapter";
+import { createPlatformAdapter } from "../../src/platform-adapter";
 import type { BridgeRequest, BridgeResponse } from "../../src/bridge";
 export default defineContentScript({
-  matches: ["https://chatgpt.com/*"],
+  matches: [
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://grok.com/*",
+    "https://gemini.google.com/*",
+  ],
   runAt: "document_idle",
   main(ctx) {
-    const adapter = new ChatGPTAdapter(document, () => new URL(location.href));
+    const adapter = createPlatformAdapter(
+      document,
+      () => new URL(location.href),
+    );
     document.getElementById("keeptemp-status")?.remove();
     const host = document.createElement("div");
     host.id = "keeptemp-status";
@@ -122,6 +130,15 @@ export default defineContentScript({
         "aria-pressed",
         "aria-checked",
         "data-state",
+        "data-index",
+        "data-perf-row",
+        "data-role",
+        "data-is-incognito",
+        "data-private-chat",
+        "data-is-temporary-chat",
+        "is-temporary-chat",
+        "id",
+        "class",
       ],
     });
     const tick = async (force = false): Promise<BridgeResponse> => {
@@ -150,8 +167,7 @@ export default defineContentScript({
                 ? "等待临时对话内容"
                 : "等待临时对话",
           );
-          const mode =
-            s?.temporary ?? temporaryMode(document, new URL(location.href));
+          const mode = s?.temporary ?? adapter.mode();
           return {
             ok: false,
             error:
@@ -232,7 +248,7 @@ export default defineContentScript({
         return false;
       }
       if (request?.type === "keeptemp:inspect-current") {
-        const mode = temporaryMode(document, new URL(location.href));
+        const mode = adapter.mode();
         reply(
           mode === true
             ? { ok: true }

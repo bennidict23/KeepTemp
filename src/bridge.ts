@@ -1,3 +1,4 @@
+import type { PlatformId } from "./platforms";
 import type { Snapshot } from "./model";
 export type BridgeRequest =
   | { type: "keeptemp:state"; id?: string }
@@ -47,6 +48,10 @@ export function validSnapshot(value: unknown): value is Snapshot {
     return size <= 2_000_000;
   });
 }
-export function scopedChatId(tabId: number, id: string) {
-  return `chatgpt:${tabId}:${id}`;
+export function scopedChatId(
+  tabId: number,
+  id: string,
+  source: PlatformId = "chatgpt",
+) {
+  return `${source}:${tabId}:${id}`;
 }
