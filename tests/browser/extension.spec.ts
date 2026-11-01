@@ -223,7 +223,9 @@ test("deletion and clearing cannot be undone by active capture tabs", async () =
     status = p.locator("#keeptemp-status").getByRole("status");
   await expect(status).toContainText("Saved");
   await panel.locator(".session").click();
-  await panel.getByText("管理这段对话", { exact: true }).click();
+  await expect(
+    panel.getByRole("button", { name: "删除会话", exact: true }),
+  ).toBeVisible();
   panel.once("dialog", (d) => d.accept());
   await panel.getByRole("button", { name: "删除会话", exact: true }).click();
   await expect(panel.locator(".session")).toHaveCount(0);

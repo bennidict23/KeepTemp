@@ -181,9 +181,28 @@ function App() {
         </section>
       ) : current ? (
         <section className="conversation-view">
-          <button className="link" onClick={() => setSelected(null)}>
-            ← 会话库
-          </button>
+          <div className="conversation-nav">
+            <button className="link" onClick={() => setSelected(null)}>
+              ← 会话库
+            </button>
+            <button
+              className="danger delete-session"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    "删除这段本地对话？无法撤销，也不会删除平台端的记录。",
+                  )
+                )
+                  void run(async () => {
+                    await repo.delete(current.id);
+                    setSelected(null);
+                  }, "已删除本地对话");
+              }}
+            >
+              删除会话
+            </button>
+          </div>
           <div className="meta">
             {dateLabel(current.updatedAt)} · {current.messages.length} 条消息
             {current.excluded ? " · 已停止保存" : ""}
@@ -253,23 +272,6 @@ function App() {
                   停止保存此会话
                 </button>
               )}
-              <button
-                className="danger"
-                disabled={busy}
-                onClick={() => {
-                  if (
-                    confirm(
-                      "删除这段本地对话？无法撤销，也不会删除平台端的记录。",
-                    )
-                  )
-                    void run(async () => {
-                      await repo.delete(current.id);
-                      setSelected(null);
-                    }, "已删除本地对话");
-                }}
-              >
-                删除会话
-              </button>
             </div>
           </details>
         </section>

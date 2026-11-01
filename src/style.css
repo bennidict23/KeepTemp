@@ -313,8 +313,17 @@ summary {
   line-height: 1.9;
   margin: 8px 0 12px;
 }
-.conversation-view > .link {
+.conversation-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
+}
+.delete-session {
+  font-size: 11px;
+  padding: 7px 10px;
+  background: transparent;
 }
 .meta {
   font-size: 10px;
