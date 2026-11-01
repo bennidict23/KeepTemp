@@ -182,8 +182,8 @@ function App() {
       ) : current ? (
         <section className="conversation-view">
           <div className="conversation-nav">
-            <button className="link" onClick={() => setSelected(null)}>
-              ← 会话库
+            <button className="back-button" onClick={() => setSelected(null)}>
+              <span aria-hidden="true">←</span> 返回
             </button>
             <button
               className="danger delete-session"

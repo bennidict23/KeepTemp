@@ -109,7 +109,7 @@ test("automatic streaming capture, exact recovery, search and export", async () 
     JSON.parse(await fs.readFile((await file.path())!, "utf8")).session
       .messages,
   ).toHaveLength(2);
-  await panel.getByRole("button", { name: "← 会话库", exact: true }).click();
+  await panel.getByRole("button", { name: "返回", exact: true }).click();
   await panel.getByRole("searchbox").fill("合成回复");
   await expect(panel.locator(".session")).toHaveCount(1);
   await panel.getByRole("searchbox").fill("absent");
@@ -272,6 +272,24 @@ test("minimal library fits narrow light and dark panels without development tool
     path: "test-results/sidepanel-dark.png",
     fullPage: true,
   });
+  await p.evaluate(() => {
+    document.querySelector("[data-markdown-text-style] p")!.textContent =
+      "合成长对话段落。\n".repeat(200) + "结尾标记";
+  });
+  await expect(panel.locator(".messages")).toContainText("结尾标记");
+  await panel.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  const back = panel.getByRole("button", { name: "返回", exact: true });
+  const box = await back.boundingBox();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.height).toBeGreaterThanOrEqual(40);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(900);
+  await expect(
+    panel.getByRole("link", { name: "新临时会话 ↗" }),
+  ).toHaveAttribute("href", "https://chatgpt.com/?temporary-chat=true");
+  await back.click();
+  await expect(panel.getByRole("searchbox")).toBeVisible();
   const manifest = JSON.parse(
     await fs.readFile(".output/chrome-mv3/manifest.json", "utf8"),
   );
@@ -279,7 +297,4 @@ test("minimal library fits narrow light and dark panels without development tool
   expect(manifest.content_scripts[0].matches).toEqual([
     "https://chatgpt.com/*",
   ]);
-  await expect(
-    panel.getByRole("link", { name: "新临时会话 ↗" }),
-  ).toHaveAttribute("href", "https://chatgpt.com/?temporary-chat=true");
 });

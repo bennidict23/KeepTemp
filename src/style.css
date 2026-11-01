@@ -314,11 +314,33 @@ summary {
   margin: 8px 0 12px;
 }
 .conversation-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 56px;
+  padding: 8px 0;
+  background: #f7f8f4f5;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  background: var(--soft);
+}
+.back-button > span {
+  font-size: 19px;
+  line-height: 1;
 }
 .delete-session {
   font-size: 11px;
@@ -337,7 +359,7 @@ summary {
 }
 .toolbar {
   position: sticky;
-  top: 0;
+  top: 56px;
   z-index: 2;
   background: #f7f8f4ef;
   backdrop-filter: blur(10px);
@@ -467,6 +489,9 @@ summary {
     --green-hover: #578865;
     --success: #293d27;
     --danger: #d59a87;
+  }
+  .conversation-nav {
+    background: #19231ef5;
   }
   .toolbar {
     background: #19231eef;
