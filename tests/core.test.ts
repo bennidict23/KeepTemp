@@ -1,229 +1,186 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { StorageRepository } from "../src/storage";
-import { SessionCapture } from "../src/capture";
-import { MockAdapter, chatGPTCapability } from "../src/adapters";
-import { importText, context, json, longContext } from "../src/recovery";
-import type { Snapshot } from "../src/model";
-function snapshot(id = "a", text = "synthetic", updatedAt = 1): Snapshot {
+import { context, json, markdown, longContext } from "../src/recovery";
+import type { Snapshot, Session } from "../src/model";
+function snapshot(id = "thread:test", text = "synthetic", time = 1): Snapshot {
   return {
     id,
+    source: "chatgpt",
     temporary: true,
     messages: [
-      { id: "m", role: "assistant", text, order: 0, createdAt: 1, updatedAt },
+      { id: "m", role: "user", text, order: 0, createdAt: 1, updatedAt: time },
     ],
   };
 }
-async function repository() {
+async function repo() {
   const r = new StorageRepository(crypto.randomUUID());
   await r.authorize();
+  await r.setAutoCapture(true);
   return r;
 }
-describe("transactional storage and capture", () => {
-  it("requires explicit authorization", async () => {
+describe("durable local capture", () => {
+  it("requires both local and website consent", async () => {
     const r = new StorageRepository(crypto.randomUUID());
     expect(await r.capture(snapshot())).toBe(false);
-    expect(await r.list()).toEqual([]);
-    await expect(
-      r.importSession(importText("[user]\nhello", "")),
-    ).rejects.toThrow();
+    await r.authorize();
+    expect(await r.capture(snapshot())).toBe(false);
+    await r.setAutoCapture(true);
+    expect(await r.capture(snapshot())).toBe(true);
+    await r.setAutoCapture(false);
+    expect(await r.capture(snapshot())).toBe(false);
   });
-  it("upserts 50 streaming scans and multiple turns without duplication", async () => {
-    const r = await repository();
+  it("upserts 50 streaming changes and multiple turns without duplicates", async () => {
+    const r = await repo();
     for (let i = 1; i <= 50; i++)
-      await r.capture(snapshot("a", "x".repeat(i), i));
-    const s = snapshot("a", "x".repeat(50), 51);
+      await r.capture(snapshot("thread:test", "x".repeat(i), i));
+    const s = snapshot("thread:test", "x".repeat(50), 51);
     s.messages.push({
-      id: "m2",
-      role: "user",
-      text: "next turn",
+      ...s.messages[0]!,
+      id: "a",
+      role: "assistant",
+      text: "answer",
       order: 1,
-      createdAt: 51,
-      updatedAt: 51,
     });
     await r.capture(s);
     await r.capture(s);
-    expect((await r.get("a"))?.messages.map((m) => m.text)).toEqual([
+    expect((await r.list())[0]?.messages.map((m) => m.text)).toEqual([
       "x".repeat(50),
-      "next turn",
+      "answer",
     ]);
   });
-  it("ignores stale updates and preserves original timestamps", async () => {
-    const r = await repository();
-    await r.capture(snapshot("a", "new", 20));
-    await r.capture(snapshot("a", "old", 10));
-    expect((await r.get("a"))?.messages[0]).toMatchObject({
+  it("preserves original time and rejects stale updates", async () => {
+    const r = await repo();
+    await r.capture(snapshot("thread:test", "new", 2));
+    await r.capture(snapshot("thread:test", "old", 1));
+    expect((await r.get("thread:test"))?.messages[0]).toMatchObject({
       text: "new",
       createdAt: 1,
     });
   });
-  it("reopens persisted data on a fresh connection", async () => {
+  it("persists after closing and reopening the database connection", async () => {
     const name = crypto.randomUUID();
     const a = new StorageRepository(name);
     await a.authorize();
+    await a.setAutoCapture(true);
     await a.capture(snapshot());
     await a.close();
     const b = new StorageRepository(name);
     expect((await b.list())[0]?.messages[0]?.text).toBe("synthetic");
   });
-  it("rejects regular and uncertain chats", async () => {
-    const r = await repository();
+  it("rejects ordinary and unknown modes", async () => {
+    const r = await repo();
     await r.capture({ ...snapshot(), temporary: false });
     await r.capture({ ...snapshot(), temporary: null });
-    expect(await r.list()).toHaveLength(0);
-    expect(chatGPTCapability.enabled).toBe(true);
+    expect(await r.list()).toEqual([]);
   });
-  it("keeps tab and navigation scopes separate", async () => {
-    const r = await repository();
+  it("separates sessions and concurrent tabs", async () => {
+    const r = await repo();
     await Promise.all(
-      ["tab1:s1", "tab2:s1", "tab1:s2"].map((id) => r.capture(snapshot(id))),
+      ["tab1:first", "tab1:second", "tab2:first"].map((id) =>
+        r.capture(snapshot(id)),
+      ),
     );
     expect(await r.list()).toHaveLength(3);
   });
-  it("does not resurrect deleted or excluded sessions", async () => {
-    const r = await repository();
-    await r.capture(snapshot("a"));
-    await r.exclude("a");
-    expect(await r.capture(snapshot("a", "secret", 2))).toBe(false);
-    await r.delete("a");
-    expect(await r.capture(snapshot("a", "again", 3))).toBe(false);
-    expect(await r.list()).toHaveLength(0);
-    expect((await r.get("a"))?.messages).toEqual([]);
+  it("pauses, resumes and excludes without losing existing content", async () => {
+    const r = await repo();
+    await r.capture(snapshot());
+    await r.pause("thread:test", true);
+    expect(await r.capture(snapshot())).toBe(false);
+    await r.pause("thread:test", false);
+    expect(await r.capture(snapshot())).toBe(true);
+    await r.exclude("thread:test");
+    expect(await r.capture(snapshot())).toBe(false);
+    expect((await r.list())[0]?.messages[0]?.text).toBe("synthetic");
   });
-  it("atomically clears content and authorization despite concurrent writes", async () => {
-    const r = await repository();
+  it("deletes content and prevents active pages resurrecting it", async () => {
+    const r = await repo();
+    await r.capture(snapshot());
+    await r.delete("thread:test");
+    expect(await r.list()).toEqual([]);
+    expect(await r.capture(snapshot())).toBe(false);
+    expect((await r.get("thread:test"))?.messages).toEqual([]);
+  });
+  it("clears records and all consent atomically with queued writes", async () => {
+    const r = await repo();
     await r.capture(snapshot());
     await Promise.all([
-      r.capture(snapshot("b")),
+      r.capture(snapshot("thread:b")),
       r.reset(),
-      r.capture(snapshot("c")),
+      r.capture(snapshot("thread:c")),
     ]);
     expect(await r.list()).toEqual([]);
     expect(await r.consent()).toBe(false);
-    expect(await r.get("a")).toBeUndefined();
+    expect(await r.autoCapture()).toBe(false);
+    expect(await r.get("thread:test")).toBeUndefined();
   });
-  it("searches full message body", async () => {
-    const r = await repository();
-    await r.capture(snapshot("a", "needle"));
-    expect(await r.list("NEEDLE")).toHaveLength(1);
+  it("searches full message text case insensitively", async () => {
+    const r = await repo();
+    await r.capture(snapshot("thread:test", "a NEEDLE in the body"));
+    expect(await r.list("needle")).toHaveLength(1);
     expect(await r.list("absent")).toHaveLength(0);
   });
-  it("shows saved only after persistence resolves", async () => {
-    let resolve!: (b: boolean) => void;
-    const states: string[] = [];
-    const capture = new SessionCapture(
-      { source: "mock", read: () => snapshot() },
+  it("retains virtualized history and inserts remounted older messages before anchors", async () => {
+    const r = await repo();
+    const newer = snapshot();
+    newer.messages[0]!.id = "new";
+    await r.capture(newer);
+    const older = snapshot();
+    older.messages[0]!.id = "old";
+    await r.capture({
+      ...older,
+      messages: [older.messages[0]!, { ...newer.messages[0]!, order: 1 }],
+    });
+    await r.capture(newer);
+    expect((await r.list())[0]?.messages.map((m) => m.id)).toEqual([
+      "old",
+      "new",
+    ]);
+  });
+});
+describe("recovery and exports", () => {
+  const s: Session = {
+    id: "test",
+    source: "chatgpt",
+    title: "合成对话",
+    createdAt: 1,
+    updatedAt: 1,
+    messages: [
       {
-        capture: () =>
-          new Promise((r) => {
-            resolve = r;
-          }),
+        id: "u",
+        role: "user",
+        text: "你好\nsecond line",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
       },
-      (s) => states.push(s),
-    );
-    const pending = capture.scan();
-    await Promise.resolve();
-    expect(states).toEqual(["saving"]);
-    resolve(true);
-    await pending;
-    expect(states).toEqual(["saving", "saved"]);
-  });
-  it("reports errors without saved and can retry", async () => {
-    const states: string[] = [];
-    const writer = {
-      capture: vi
-        .fn()
-        .mockRejectedValueOnce(new Error("synthetic failure"))
-        .mockResolvedValueOnce(true),
-    };
-    const c = new SessionCapture(
-      { source: "mock", read: () => snapshot() },
-      writer,
-      (s) => states.push(s),
-    );
-    await c.scan();
-    expect(states).toEqual(["saving", "error"]);
-    await c.scan();
-    expect(states.at(-1)).toBe("saved");
-  });
-  it("pauses writes", async () => {
-    const writer = { capture: vi.fn() };
-    const c = new SessionCapture(
-      { source: "mock", read: () => snapshot() },
-      writer,
-      () => {},
-    );
-    c.pause(true);
-    await c.scan();
-    expect(writer.capture).not.toHaveBeenCalled();
-  });
-});
-it("appends new DOM messages after refresh without interleaving existing turns", async () => {
-  const r = await repository();
-  const first = snapshot();
-  first.messages = [
-    { ...first.messages[0]!, id: "u1", role: "user", order: 0 },
-    { ...first.messages[0]!, id: "a1", order: 1 },
-  ];
-  await r.capture(first);
-  const refreshed = {
-    ...first,
-    messages: first.messages.map((m) => ({
-      ...m,
-      id: m.id + "new",
-      updatedAt: 2,
-    })),
+      {
+        id: "a",
+        role: "assistant",
+        text: "answer <script>plain text</script>",
+        order: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
   };
-  await r.capture(refreshed);
-  expect((await r.get("a"))?.messages.map((m) => m.id)).toEqual([
-    "u1",
-    "a1",
-    "u1new",
-    "a1new",
-  ]);
-});
-describe("DOM adapter", () => {
-  it("uses stable ids during streaming and scopes sessions", () => {
-    const el = document.createElement("div");
-    el.dataset.session = "s1";
-    el.dataset.temporary = "true";
-    el.innerHTML =
-      '<article data-message-id="m1" data-role="assistant">part</article>';
-    const a = new MockAdapter(el, "tab1");
-    expect(a.read()?.messages[0]?.text).toBe("part");
-    el.firstElementChild!.textContent = "complete";
-    expect(a.read()?.messages).toHaveLength(1);
-    expect(a.read()?.messages[0]?.id).toBe("m1");
-    expect(new MockAdapter(el, "tab2").read()?.id).not.toBe(a.read()?.id);
-    el.dataset.session = "s2";
-    expect(a.read()?.id).toBe("mock:tab1:s2");
-    delete el.dataset.temporary;
-    expect(a.read()?.temporary).toBe(null);
-  });
-});
-describe("explicit import and recovery", () => {
-  it("preserves roles order Unicode and multiline text through JSON", () => {
-    const s = importText(
-      "[user]\n你好\nsecond line\n\n[assistant]\nanswer",
-      "",
+  it("copies roles, Unicode and original stored text exactly", () => {
+    expect(context(s)).toBe(
+      "[user]\n你好\nsecond line\n\n[assistant]\nanswer <script>plain text</script>",
     );
-    expect(context(s)).toBe("[user]\n你好\nsecond line\n\n[assistant]\nanswer");
-    expect(context(importText(json(s), ""))).toBe(context(s));
   });
-  it("does not render HTML or guess unsupported roles", () => {
-    expect(() => importText("ambiguous prose", "")).toThrow();
-    expect(() =>
-      importText(
-        '{"version":1,"session":{"messages":[{"role":"system","text":"x"}]}}',
-        "",
-      ),
-    ).toThrow();
-    const s = importText("[user]\n<script>test</script>", "");
-    expect(s.messages[0]?.text).toBe("<script>test</script>");
+  it("exports a versioned JSON record without losing text", () => {
+    expect(JSON.parse(json(s))).toEqual({ version: 1, session: s });
+    expect(markdown(s)).toContain(
+      "## assistant\n\nanswer <script>plain text</script>",
+    );
   });
-  it("rejects oversized imports and warns about long contexts without truncation", () => {
-    expect(() => importText("x".repeat(2000001), "")).toThrow();
-    const s = importText("[user]\n" + "字".repeat(25000), "");
-    expect(longContext(s)).toBe(true);
-    expect(context(s).length).toBe(25007);
+  it("warns about long context without truncating it", () => {
+    const long = {
+      ...s,
+      messages: [{ ...s.messages[0]!, text: "字".repeat(25000) }],
+    };
+    expect(longContext(long)).toBe(true);
+    expect(context(long).length).toBe(25007);
   });
 });

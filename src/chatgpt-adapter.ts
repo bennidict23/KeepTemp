@@ -177,60 +177,6 @@ export class ChatGPTAdapter implements PlatformAdapter {
     private doc: Document,
     private location: () => URL,
   ) {}
-  diagnose() {
-    const url = this.location();
-    const all = [...this.doc.querySelectorAll<HTMLElement>(roleSelector)];
-    const scoped = candidateNodes(this.doc);
-    const users = scoped.filter((el) => roleOf(el) === "user");
-    const first = users.find(visible);
-    const mode = temporaryMode(this.doc, url);
-    const reason =
-      mode === false
-        ? "regular"
-        : mode !== true
-          ? "mode-unknown"
-          : !scoped.length
-            ? all.length
-              ? "outside-main"
-              : "message-markers-missing"
-            : !first
-              ? "user-message-missing"
-              : !sessionKey(first)
-                ? "session-id-missing"
-                : scoped.some(
-                      (el) =>
-                        visible(el) && roleOf(el) !== null && !stableId(el),
-                    )
-                  ? "message-id-missing"
-                  : "ready";
-    // Fixed enums and numeric counts only: no text, URL path/query values, native ids,
-    // account names, arbitrary attributes or HTML are included in the report.
-    return {
-      version: "0.2.2",
-      reason,
-      mode,
-      temporaryQuery: url.searchParams.get("temporary-chat") === "true",
-      mainRegions: this.doc.querySelectorAll("main,[role=main]").length,
-      roleNodes: this.doc.querySelectorAll("[data-message-author-role]").length,
-      candidateNodes: all.length,
-      modernUnitNodes: this.doc.querySelectorAll(
-        "[data-chatgpt-search-unit-key],[data-content-search-unit-key]",
-      ).length,
-      activeTimelines: this.doc.querySelectorAll(
-        '[data-app-action-timeline-scroll][role="region"]',
-      ).length,
-      modernTurnNodes: this.doc.querySelectorAll("[data-turn-key]").length,
-      scopedRoleNodes: scoped.length,
-      visibleRoleNodes: scoped.filter(visible).length,
-      userNodes: users.length,
-      assistantNodes: scoped.filter((el) => roleOf(el) === "assistant").length,
-      firstUserHasNativeId: Boolean(first && nativeMessageId(first)),
-      firstUserHasTurnId: Boolean(first && turnKey(first)),
-      turnNodes: this.doc.querySelectorAll(
-        '[data-turn-id],[data-testid^="conversation-turn-"]',
-      ).length,
-    };
-  }
   read(): Snapshot | null {
     const url = this.location();
     if (

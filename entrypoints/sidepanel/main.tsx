@@ -1,78 +1,104 @@
 import { browser } from "wxt/browser";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { StorageRepository } from "../../src/storage";
-import {
-  context,
-  json,
-  markdown,
-  longContext,
-  importText,
-} from "../../src/recovery";
+import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
 import "../../src/style.css";
 const repo = new StorageRepository();
-const sourceName = (source: Session["source"]) =>
-  source === "chatgpt"
-    ? "ChatGPT"
-    : source === "mock"
-      ? "合成模拟"
-      : "主动导入";
+function dateLabel(value: number) {
+  const d = new Date(value),
+    now = new Date();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  return value >= today
+    ? `今天 ${d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    : value >= today - 86400000
+      ? "昨天"
+      : d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
 function App() {
   const [consent, setConsent] = useState<boolean | null>(null),
+    [enabled, setEnabled] = useState(false),
     [sessions, setSessions] = useState<Session[]>([]),
     [query, setQuery] = useState(""),
     [selected, setSelected] = useState<string | null>(null),
-    [adding, setAdding] = useState(false),
-    [text, setText] = useState(""),
-    [title, setTitle] = useState(""),
+    [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(false);
-  const [autoCapture, setAutoCapture] = useState(false);
+    [failed, setFailed] = useState(false),
+    [copied, setCopied] = useState(false);
+  const listScroll = useRef(0);
   const current = sessions.find((s) => s.id === selected);
-  async function refresh() {
-    setConsent(await repo.consent());
-    setAutoCapture(await repo.autoCapture());
-    setSessions(await repo.list(query));
+  async function load() {
+    const [c, e, s] = await Promise.all([
+      repo.consent(),
+      repo.autoCapture(),
+      repo.list(),
+    ]);
+    return { c, e, s };
+  }
+  function apply(data: Awaited<ReturnType<typeof load>>) {
+    setConsent(data.c);
+    setEnabled(data.e);
+    setSessions(data.s);
   }
   useEffect(() => {
     let active = true;
-    const load = async () => {
+    const refresh = async () => {
       try {
-        const c = await repo.consent(),
-          s = await repo.list(query);
-        if (active) {
-          setConsent(c);
-          setAutoCapture(await repo.autoCapture());
-          setSessions(s);
-        }
+        const data = await load();
+        if (active) apply(data);
       } catch {
-        if (active) setNotice("无法读取本地数据库。请检查浏览器存储设置。");
+        if (active) {
+          setFailed(true);
+          setNotice("暂时无法读取本地记录，请检查浏览器存储设置。");
+        }
       }
     };
-    void load();
-    const timer = setInterval(load, 1000);
+    void refresh();
+    const timer = setInterval(refresh, 1000);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [query]);
-  async function run(task: () => Promise<void>, message = "") {
+  }, []);
+  useEffect(() => {
+    if (!notice || failed) return;
+    const timer = setTimeout(() => setNotice(""), 3500);
+    return () => clearTimeout(timer);
+  }, [notice, failed]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  useEffect(() => {
+    window.scrollTo(0, selected ? 0 : listScroll.current);
+    setCopied(false);
+  }, [selected]);
+  async function run(
+    task: () => Promise<void>,
+    success = "",
+    failure = "操作未完成，请检查本地存储空间后重试。",
+  ) {
     setBusy(true);
     setNotice("");
     try {
       await task();
-      await refresh();
-      setNotice(message);
+      apply(await load());
+      setFailed(false);
+      setNotice(success);
     } catch {
-      setNotice(
-        "操作未完成。导入需使用 [user] / [assistant] 独占一行的格式或 KeepTemp JSON；也请检查存储空间与剪贴板权限。",
-      );
+      setFailed(true);
+      setNotice(failure);
     } finally {
       setBusy(false);
     }
   }
-  function download(s: Session, kind: "md" | "json") {
+  function exportFile(s: Session, kind: "md" | "json") {
     const url = URL.createObjectURL(
       new Blob([kind === "md" ? markdown(s) : json(s)], {
         type:
@@ -85,28 +111,37 @@ function App() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  const visible = sessions.filter(
+    (s) =>
+      !query ||
+      `${s.title}\n${s.messages.map((m) => m.text).join("\n")}`
+        .toLocaleLowerCase()
+        .includes(query.toLocaleLowerCase()),
+  );
   return (
     <main>
       <header>
-        <a
+        <button
           className="brand"
-          href="#"
-          onClick={() => {
-            setSelected(null);
-            setAdding(false);
-          }}
+          onClick={() => setSelected(null)}
+          aria-label="返回对话列表"
         >
           ▱ <strong>KeepTemp</strong>
-        </a>
-        <span className="badge">LOCAL ONLY</span>
+        </button>
+        <span className="badge">
+          <span aria-hidden="true">●</span> 仅存本机
+        </span>
       </header>
       {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
+        <div className="toast" data-tone={failed ? "error" : "success"}>
+          <p role="status">{notice}</p>
+          <button aria-label="关闭提示" onClick={() => setNotice("")}>
+            ×
+          </button>
+        </div>
       )}
       {consent === null ? (
-        <p>正在打开本地数据库…</p>
+        <p>正在打开本地记录…</p>
       ) : !consent ? (
         <section className="welcome">
           <span className="eyebrow">A LITTLE LESS TEMPORARY</span>
@@ -115,23 +150,24 @@ function App() {
             <br />
             留在你手中。
           </h1>
-          <p>在本地保存一份文字，随时找回和接续。</p>
+          <p>
+            照常聊天，自动留一份在本机。
+            <br />
+            想继续时，随时找回。
+          </p>
           <div className="card">
-            <h3>开启之前，你需要知道</h3>
+            <h3>开始之前</h3>
             <p>
-              聊天保存在此 Chrome 配置的 IndexedDB
-              中，不上传，无账号、云同步或分析 SDK。
+              只保存被识别为 Temporary 的可见对话文字，不上传，不需要账号或 API
+              Key。
             </p>
             <p>
-              本地数据库没有应用层加密，不是密码保险库。卸载扩展或清理浏览器数据可能丢失记录，请按需导出备份。
+              本地数据库未加密，不是密码保险库。卸载扩展或清理浏览器数据可能丢失记录，请按需导出。
             </p>
             <p>
-              本地保存不会改变平台端保留策略。OpenAI 表示 Temporary Chat
-              可能为安全目的保留最多 30 天。
-            </p>
-            <p>
-              你可在授权后单独启用 ChatGPT 自动保存。启用后只读取被识别为
-              Temporary 的可见对话文字；普通或无法识别的聊天不保存。
+              本地保存不改变平台端保留规则；OpenAI
+              可能为安全目的保留临时聊天最多 30
+              天。复制接续不恢复原服务端会话、附件或工具状态。
             </p>
           </div>
           <button
@@ -141,77 +177,16 @@ function App() {
           >
             我了解并同意本地保存
           </button>
-          <small>
-            恢复仅复制文字上下文，不恢复原服务端会话、附件或工具状态。
-          </small>
-        </section>
-      ) : adding ? (
-        <section>
-          <button className="link" onClick={() => setAdding(false)}>
-            ← 返回会话库
-          </button>
-          <h1>留下一段对话</h1>
-          <p>
-            主动粘贴你有权保存的内容。每个角色使用独占一行的标记，内容中的同名标记请使用
-            JSON 导入以避免歧义。
-          </p>
-          <label>
-            标题（选填）
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="这段对话关于什么？"
-            />
-          </label>
-          <label>
-            对话文字或 KeepTemp JSON
-            <textarea
-              rows={14}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={"[user]\n如何开始？\n\n[assistant]\n从一小步开始。"}
-            />
-          </label>
-          <label className="file">
-            或选择 JSON 文件
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f)
-                  void run(async () => {
-                    if (f.size > 2_000_000) throw Error();
-                    setText(await f.text());
-                  });
-              }}
-            />
-          </label>
-          <button
-            className="primary full"
-            disabled={busy || !text.trim()}
-            onClick={() =>
-              run(async () => {
-                const s = importText(text, title);
-                await repo.importSession(s);
-                setText("");
-                setTitle("");
-                setAdding(false);
-                setSelected(s.id);
-              }, "已保存到本地")
-            }
-          >
-            保存到本地
-          </button>
+          <small>同意后，再开启 ChatGPT 自动保存。</small>
         </section>
       ) : current ? (
-        <section>
+        <section className="conversation-view">
           <button className="link" onClick={() => setSelected(null)}>
             ← 会话库
           </button>
           <div className="meta">
-            {sourceName(current.source)} ·{" "}
-            {new Date(current.updatedAt).toLocaleString()}
+            {dateLabel(current.updatedAt)} · {current.messages.length} 条消息
+            {current.excluded ? " · 已停止保存" : ""}
           </div>
           <h1>{current.title}</h1>
           <div className="toolbar">
@@ -220,179 +195,207 @@ function App() {
               disabled={busy}
               onClick={() =>
                 run(
-                  () => navigator.clipboard.writeText(context(current)),
+                  async () => {
+                    await navigator.clipboard.writeText(context(current));
+                    setCopied(true);
+                  },
                   "已复制上下文",
+                  "未能写入剪贴板，请检查浏览器权限后重试。",
                 )
               }
             >
-              复制上下文
+              {copied ? "已复制 ✓" : "复制上下文"}
             </button>
-            <button onClick={() => download(current, "md")}>Markdown</button>
-            <button onClick={() => download(current, "json")}>JSON</button>
+            <a
+              className="button"
+              href="https://chatgpt.com/?temporary-chat=true"
+              target="_blank"
+              rel="noreferrer"
+            >
+              新临时会话 ↗
+            </a>
           </div>
-          <a
-            className="external"
-            href="https://chatgpt.com/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            打开新 ChatGPT 会话 ↗
-          </a>
-          <small>
-            请自行选择 Temporary
-            模式并粘贴发送。复制不会自动发送，也不恢复原会话。
-          </small>
+          <small>复制后，在新会话粘贴并发送，即可接续文字上下文。</small>
           {longContext(current) && (
             <p className="notice">
-              这段上下文较长（超过 24,000
-              字符），可能超出所选模型容量。此提示不计算精确
-              token，内容不会被自动截断。
+              这段对话较长，可能超过所选模型的上下文容量。复制内容保持完整，不会自动截断。
             </p>
           )}
           <div className="messages">
             {current.messages.map((m) => (
               <article key={m.id}>
                 <span className="eyebrow">
-                  {m.role === "user" ? "YOU" : "ASSISTANT"}
+                  {m.role === "user" ? "你" : "ChatGPT"}
                 </span>
                 <p>{m.text}</p>
               </article>
             ))}
           </div>
-          <div className="toolbar">
-            {current.source !== "manual" && !current.excluded && (
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(
-                    () => repo.exclude(current.id),
-                    "此会话已排除，后续不再捕获",
-                  )
-                }
-              >
-                排除此会话
+          <details className="tools">
+            <summary>管理这段对话</summary>
+            <div className="tool-actions">
+              <button onClick={() => exportFile(current, "md")}>
+                导出 Markdown
               </button>
-            )}
-            <button
-              className="danger"
-              disabled={busy}
-              onClick={() => {
-                if (confirm("删除此会话？无法撤销。"))
-                  void run(async () => {
-                    await repo.delete(current.id);
-                    setSelected(null);
-                  }, "已删除");
-              }}
-            >
-              删除会话
-            </button>
-          </div>
+              <button onClick={() => exportFile(current, "json")}>
+                导出 JSON
+              </button>
+              {!current.excluded && current.source !== "manual" && (
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => repo.exclude(current.id),
+                      "已停止保存此会话，现有记录保留。",
+                    )
+                  }
+                >
+                  停止保存此会话
+                </button>
+              )}
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    confirm(
+                      "删除这段本地对话？无法撤销，也不会删除平台端的记录。",
+                    )
+                  )
+                    void run(async () => {
+                      await repo.delete(current.id);
+                      setSelected(null);
+                    }, "已删除本地对话");
+                }}
+              >
+                删除会话
+              </button>
+            </div>
+          </details>
         </section>
       ) : (
         <section>
-          <span className="eyebrow">YOUR LOCAL SHELF</span>
-          <h1>值得留下的对话</h1>
-          <p>留一份文字，为下一次思考接上文。</p>
-          <div className="card">
-            <h3>ChatGPT 自动保存 · 实验功能</h3>
-            <p>
-              启用后，你在 chatgpt.com 的 Temporary Chat
-              可见文字会自动保存在本机。页面右下角显示状态，可暂停或排除。普通聊天与识别不确定的页面不保存。
-            </p>
+          <div className="shelf-heading">
+            <div>
+              <span className="eyebrow">KEEP WHAT MATTERS</span>
+              <h1>你的对话</h1>
+            </div>
+            <span className="count">{sessions.length} 段</span>
+          </div>
+          <div className="capture-strip" data-enabled={enabled}>
+            <span className="status-dot" aria-hidden="true" />
+            <div>
+              <strong>{enabled ? "自动保存已开启" : "自动保存尚未开启"}</strong>
+              <small>
+                {enabled
+                  ? "照常聊天，文字留在本机。"
+                  : "只保存可识别的临时对话。"}
+              </small>
+            </div>
             <button
-              className={autoCapture ? "" : "primary"}
+              className="toggle"
+              aria-label={
+                enabled ? "关闭 ChatGPT 自动保存" : "启用 ChatGPT 自动保存"
+              }
               disabled={busy}
               onClick={() =>
                 run(
-                  () => repo.setAutoCapture(!autoCapture),
-                  autoCapture
+                  () => repo.setAutoCapture(!enabled),
+                  enabled
                     ? "已关闭自动保存"
-                    : "已启用。请刷新 ChatGPT 页面，打开 Temporary Chat 查看右下角状态。",
+                    : "已开启自动保存，请在新标签页开始临时聊天。",
                 )
               }
             >
-              {autoCapture ? "关闭 ChatGPT 自动保存" : "启用 ChatGPT 自动保存"}
+              {enabled ? "关闭" : "开启"}
             </button>
-            {autoCapture && (
-              <a
-                className="external"
-                href="https://chatgpt.com/?temporary-chat=true"
-                target="_blank"
-                rel="noreferrer"
-              >
-                打开 ChatGPT 临时聊天 ↗
-              </a>
-            )}
           </div>
-          <button className="primary full" onClick={() => setAdding(true)}>
-            ＋ 粘贴或导入对话
-          </button>
+          <a
+            className="primary new-chat"
+            href="https://chatgpt.com/?temporary-chat=true"
+            target="_blank"
+            rel="noreferrer"
+          >
+            ＋ 新建临时聊天 <span aria-hidden="true">↗</span>
+          </a>
           <input
             aria-label="全文搜索"
             type="search"
-            placeholder="搜索标题与全文…"
+            placeholder="搜索对话…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <div className="list">
-            {sessions.length ? (
-              sessions.map((s) => (
+          <div className="list" aria-label="本地会话">
+            {visible.length ? (
+              visible.map((s) => (
                 <button
                   className="session"
                   key={s.id}
-                  onClick={() => setSelected(s.id)}
+                  onClick={() => {
+                    listScroll.current = window.scrollY;
+                    setSelected(s.id);
+                  }}
                 >
-                  <span className="meta">
-                    {sourceName(s.source)} · {s.messages.length} 条消息
-                    {s.excluded ? " · 已排除" : ""}
+                  <span className="session-meta">
+                    <span>{s.excluded ? "已停止保存" : "临时对话"}</span>
+                    <time
+                      dateTime={new Date(s.updatedAt).toISOString()}
+                      title={new Date(s.updatedAt).toLocaleString()}
+                    >
+                      {dateLabel(s.updatedAt)}
+                    </time>
                   </span>
                   <strong>{s.title}</strong>
-                  <span>{s.messages.at(-1)?.text.slice(0, 100)}</span>
+                  <span className="preview">
+                    {s.messages.at(-1)?.text.slice(0, 100)}
+                  </span>
+                  <span className="message-count">
+                    {s.messages.length} 条消息 <span aria-hidden="true">→</span>
+                  </span>
                 </button>
               ))
             ) : (
               <div className="empty">
                 <div className="empty-icon">▱</div>
-                <h3>
-                  {query ? "没有匹配的对话" : "你的本地书架，等第一段对话"}
-                </h3>
-                <p>启用自动保存后，在 ChatGPT Temporary Chat 开始对话即可。</p>
+                <h3>{query ? "没有找到相关对话" : "下一段好对话，留在这里"}</h3>
+                <p>
+                  {query
+                    ? "换个关键词试试，标题和正文都可以搜。"
+                    : "开启自动保存，开始临时聊天。保存成功后会自动出现在这里。"}
+                </p>
+                {query && (
+                  <button className="link" onClick={() => setQuery("")}>
+                    清除搜索
+                  </button>
+                )}
               </div>
             )}
           </div>
-          <button
-            className="link"
-            onClick={() =>
-              browser.tabs.create({ url: browser.runtime.getURL("/demo.html") })
-            }
-          >
-            打开合成聊天实验室 ↗
-          </button>
-          <footer>
-            <p>
-              ChatGPT 自动保存：{autoCapture ? "已启用" : "未启用"} · 仅
-              chatgpt.com
+          <details className="tools">
+            <summary>本地数据与隐私</summary>
+            <p className="settings-note">
+              记录只在此浏览器中保存，没有云同步。数据库未加密，卸载扩展可能丢失数据。请在对话内导出需要备份的记录。
             </p>
-            <p>本地存储未加密；请按需导出备份。</p>
             <button
               className="danger link"
               disabled={busy}
               onClick={() => {
                 if (
-                  confirm("彻底清空本地会话、设置与授权？需重新同意才可保存。")
+                  confirm(
+                    "清空所有本地记录并撤回保存授权？无法撤销。已导出的文件和平台端记录不会被删除。",
+                  )
                 )
                   void run(async () => {
                     await repo.reset();
                     setSelected(null);
-                    setText("");
-                    setTitle("");
-                    setAdding(false);
-                  }, "全部本地数据与授权已清空");
+                    setQuery("");
+                  }, "全部本地记录与授权已清空");
               }}
             >
               清空所有数据并撤回授权
             </button>
-          </footer>
+          </details>
+          <p className="local-note">仅存本机 · 无云同步 · 随时删除</p>
         </section>
       )}
     </main>

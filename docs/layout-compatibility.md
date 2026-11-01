@@ -1,9 +1,9 @@
-# 新版页面布局兼容性记录
+# 页面布局记录
 
-2026-11-02：用户提供无内容诊断：mode=true、mainRegions=1，但 roleNodes=0、turnNodes=0。这证明 0.2.1 使用的旧标记没有匹配到用户页面，不能归咎于未开启 Temporary。
+0.2.1 曾匹配不到用户页面中的旧消息属性。依据 [Oracle 新布局问题报告](https://github.com/steipete/oracle/issues/517) 与 [AI Conversation Navigator DOM 实测](https://github.com/JoonJ14/ai-conversation-navigator/blob/main/DOM-REFERENCE.md#chatgpt) 补充了新版语义搜索单元、原生 turn key、活动时间线及会话容器身份。0.2.2 随后由用户确认可以识别与保存。
 
-查得开发者 [Oracle 的同类问题报告](https://github.com/steipete/oracle/issues/517)：新版 Chat/Work 布局移除了旧消息属性，改为语义搜索单元与原生 turn key。另参照 [AI Conversation Navigator 的 DOM 实测记录](https://github.com/JoonJ14/ai-conversation-navigator/blob/main/DOM-REFERENCE.md#chatgpt) 关于活动时间线、重复包装和虚拟化的观察。
+这类属性不是平台稳定接口。保留旧布局支持，在新布局中按活动 region 排除 presentation 副本，外内嵌套角色包装只捕获一次。原生 turn key 按 user/assistant 区分，不以 fallback 的窗口序号作为会话或消息身份。
 
-这些是其他开发者的结构记录，不是 OpenAI 稳定接口承诺，也不是本项目在用户账号上的实测。0.2.2 实现独立的 DOM 适配与合成回归，未使用参考项目的私有接口或历史补抓路径。
+虚拟列表可能移除此前消息；插件保留已观察记录，不主动滚动或调用接口补抓历史。缺少稳定会话标记或顺序锚点时仍有覆盖限制。
 
-为保护私人内容，诊断只提供已知标记的数量、状态枚举和布尔值，不输出文字、标题、HTML、具体消息/会话 id、任意属性值或完整网址。新增 modernUnitNodes、activeTimelines、modernTurnNodes 用于区分新旧布局。真实兼容性仍需用户在新版上确认。
+0.3.0 已从产品删除诊断、模拟页与开发提示。回归测试留在 tests/，通过本地请求路由提供合成页面，不读取用户私人聊天。
