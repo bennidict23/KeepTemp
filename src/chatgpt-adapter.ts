@@ -58,12 +58,19 @@ export function temporaryMode(doc: Document, url: URL): boolean | null {
   }
   return null;
 }
+function nativeMessageId(el: HTMLElement): string | undefined {
+  return (
+    el.dataset.messageId ??
+    el.closest<HTMLElement>("[data-message-id]")?.dataset.messageId ??
+    el.querySelector<HTMLElement>("[data-message-id]")?.dataset.messageId
+  );
+}
 function stableId(el: HTMLElement): string | null {
   const turn = el.closest<HTMLElement>(
-    'article[data-turn-id],article[data-testid^="conversation-turn-"]',
+    '[data-turn-id],[data-testid^="conversation-turn-"]',
   );
   const id =
-    turn?.dataset.turnId ?? turn?.dataset.testid ?? el.dataset.messageId;
+    turn?.dataset.turnId ?? turn?.dataset.testid ?? nativeMessageId(el);
   return id && id.length <= 250 ? id : null;
 }
 export function messageText(el: HTMLElement): string {
@@ -91,6 +98,65 @@ export class ChatGPTAdapter implements PlatformAdapter {
     private doc: Document,
     private location: () => URL,
   ) {}
+  diagnose() {
+    const url = this.location();
+    const all = [
+      ...this.doc.querySelectorAll<HTMLElement>("[data-message-author-role]"),
+    ];
+    const scoped = all.filter((el) => el.closest("main,[role=main]"));
+    const users = scoped.filter(
+      (el) => el.dataset.messageAuthorRole === "user",
+    );
+    const first = users.find(visible);
+    const mode = temporaryMode(this.doc, url);
+    const reason =
+      mode === false
+        ? "regular"
+        : mode !== true
+          ? "mode-unknown"
+          : !scoped.length
+            ? all.length
+              ? "outside-main"
+              : "message-markers-missing"
+            : !first
+              ? "user-message-missing"
+              : !(
+                    nativeMessageId(first) ??
+                    first.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId
+                  )
+                ? "session-id-missing"
+                : scoped.some(
+                      (el) =>
+                        visible(el) &&
+                        ["user", "assistant"].includes(
+                          el.dataset.messageAuthorRole ?? "",
+                        ) &&
+                        !stableId(el),
+                    )
+                  ? "message-id-missing"
+                  : "ready";
+    // Fixed enums and numeric counts only: no text, URL path/query values, native ids,
+    // account names, arbitrary attributes or HTML are included in the report.
+    return {
+      version: "0.2.1",
+      reason,
+      mode,
+      temporaryQuery: url.searchParams.get("temporary-chat") === "true",
+      mainRegions: this.doc.querySelectorAll("main,[role=main]").length,
+      roleNodes: all.length,
+      scopedRoleNodes: scoped.length,
+      visibleRoleNodes: scoped.filter(visible).length,
+      userNodes: users.length,
+      assistantNodes: scoped.filter(
+        (el) => el.dataset.messageAuthorRole === "assistant",
+      ).length,
+      firstUserHasNativeId: Boolean(first && nativeMessageId(first)),
+      firstUserHasTurnId: Boolean(first?.closest("[data-turn-id]")),
+      turnNodes: this.doc.querySelectorAll(
+        '[data-turn-id],[data-testid^="conversation-turn-"]',
+      ).length,
+    };
+  }
   read(): Snapshot | null {
     const url = this.location();
     if (
@@ -103,7 +169,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
       return { id: "unknown", source: "chatgpt", temporary, messages: [] };
     const nodes = [
       ...this.doc.querySelectorAll<HTMLElement>(
-        "main [data-message-author-role]",
+        "main [data-message-author-role],[role=main] [data-message-author-role]",
       ),
     ].filter(visible);
     const now = Date.now();
@@ -131,7 +197,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
       (el) => el.dataset.messageAuthorRole === "user",
     );
     const firstKey =
-      firstNode?.dataset.messageId ??
+      (firstNode ? nativeMessageId(firstNode) : undefined) ??
       firstNode?.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId;
     if (!firstKey || firstKey.length > 250 || !messages.length) return null;
     // First user marker is retained when / becomes /c/... and across refreshes.

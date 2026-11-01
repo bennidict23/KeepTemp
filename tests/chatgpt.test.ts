@@ -134,3 +134,55 @@ describe("ChatGPT visible-DOM adapter (synthetic fixtures only)", () => {
     expect(await r.autoCapture()).toBe(false);
   });
 });
+
+describe("structure compatibility and privacy-safe diagnostics", () => {
+  it("supports role=main and native message ids placed on ancestors", () => {
+    document.body.innerHTML =
+      '<div role="main"><section data-message-id="parent-user-uuid"><div data-message-author-role="user">private synthetic question</div></section><section data-message-id="parent-answer-uuid"><div data-message-author-role="assistant">private synthetic answer</div></section></div>';
+    const a = new ChatGPTAdapter(
+      document,
+      () => new URL("https://chatgpt.com/?temporary-chat=true"),
+    );
+    expect(a.read()?.id).toBe("thread:parent-user-uuid");
+    expect(a.read()?.messages.map((m) => m.text)).toEqual([
+      "private synthetic question",
+      "private synthetic answer",
+    ]);
+    expect(a.diagnose().reason).toBe("ready");
+  });
+  it("supports native ids nested inside role wrappers and div turn containers", () => {
+    document.body.innerHTML =
+      '<main><div data-testid="conversation-turn-0"><div data-message-author-role="user"><div data-message-id="nested-user-uuid">question</div></div></div><div data-testid="conversation-turn-1"><div data-message-author-role="assistant"><div data-message-id="nested-answer-uuid">answer</div></div></div></main>';
+    const a = new ChatGPTAdapter(
+      document,
+      () => new URL("https://chatgpt.com/?temporary-chat=true"),
+    );
+    expect(a.read()?.id).toBe("thread:nested-user-uuid");
+    expect(a.read()?.messages).toHaveLength(2);
+  });
+  it("reports precise structural failures without content, ids or full URLs", () => {
+    fixture();
+    let url =
+      "https://chatgpt.com/c/private-path?temporary-chat=true&private=secret";
+    const a = new ChatGPTAdapter(document, () => new URL(url));
+    document.querySelector("header")!.remove();
+    document
+      .querySelector('[data-message-author-role="user"]')!
+      .removeAttribute("data-message-id");
+    expect(a.diagnose().reason).toBe("session-id-missing");
+    const report = JSON.stringify(a.diagnose());
+    for (const secret of [
+      "private-path",
+      "secret",
+      "合成问题",
+      "第一段",
+      "user-uuid",
+      "assistant-uuid",
+    ])
+      expect(report).not.toContain(secret);
+    document.querySelector("main")!.innerHTML = "synthetic raw content";
+    expect(a.diagnose().reason).toBe("message-markers-missing");
+    url = "https://chatgpt.com/";
+    expect(a.diagnose().reason).toBe("mode-unknown");
+  });
+});

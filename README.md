@@ -1,12 +1,18 @@
 # KeepTemp
 
-本地保存 ChatGPT Temporary Chat 的 Chrome 扩展。**0.2.0 已接入真实页面 DOM 自动捕获，处于实验阶段；尚未用真实 ChatGPT 账号验收。** 不再要求逐轮手动复制粘贴。
+本地保存 ChatGPT Temporary Chat 的 Chrome 扩展。**0.2.1 已接入真实页面 DOM 自动捕获，处于实验阶段；尚未用真实 ChatGPT 账号验收。** 不再要求逐轮手动复制粘贴。
+
+## 0.2.1 兼容性修复
+
+支持 `[role=main]` 页面区域，以及消息 id 位于角色节点祖先/子节点、turn 容器为 div 的结构。识别失败时分别显示模式、消息节点或稳定身份缺失，不再把所有问题都显示成同一句“等待”。右下角“复制诊断（不含聊天内容）”仅复制固定状态、布尔值和结构计数，不包含聊天、原生 id、HTML 或完整网址。
+
+本次修复依据结构兼容性问题推导及合成回归，不宣称已定位用户真实 DOM 的具体差异。真实页面若仍无法识别，需要用户主动提供该无内容诊断。更新前请保留未保存的临时聊天；更新后在新测试标签页验证，刷新旧临时聊天可能丢失页面内容。
 
 ## 更新及开始使用
 
 本次已构建：`path/to/KeepTemp/.output/chrome-mv3`。
 
-1. 打开 `chrome://extensions`，找到 KeepTemp，点击刷新图标。版本应显示 **0.2.0**；若 Chrome 提示确认 chatgpt.com 网站访问权限，需允许该站点访问。
+1. 打开 `chrome://extensions`，找到 KeepTemp，点击刷新图标。版本应显示 **0.2.1**；若 Chrome 提示确认 chatgpt.com 网站访问权限，需允许该站点访问。
 2. 打开 KeepTemp Side Panel。首次用户先阅读隐私说明、同意本地保存；已授权旧版的用户无需清空已有数据。
 3. 点击 **启用 ChatGPT 自动保存**。这是独立授权，旧版手动保存授权不会自动开启网站捕获。
 4. 刷新已打开的 ChatGPT 网页，使新版内容脚本加载。打开 Temporary Chat，或点击面板的“打开 ChatGPT 临时聊天”入口（`https://chatgpt.com/?temporary-chat=true`）。请确认网页本身显示 Temporary。

@@ -330,3 +330,60 @@ test("ChatGPT worker storage failure is visible and retries without claiming Sav
   await panel.close();
   await browser.unroute("https://chatgpt.com/**");
 });
+
+test("role=main with ancestor ids saves and diagnostic copy contains no conversation data", async () => {
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: '<!doctype html><div role="main"><section data-message-id="private-native-user-id"><div data-message-author-role="user">synthetic sensitive question</div></section><section data-message-id="private-native-assistant-id"><div data-message-author-role="assistant">synthetic sensitive answer</div></section></div>',
+    }),
+  );
+  const panel = await browser.newPage();
+  await panel.goto(`${base}/sidepanel.html`);
+  await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
+  await panel
+    .getByRole("button", { name: "启用 ChatGPT 自动保存", exact: true })
+    .click();
+  const chat = await browser.newPage();
+  await chat.goto("https://chatgpt.com/?temporary-chat=true");
+  const widget = chat.locator("#keeptemp-status");
+  await expect(widget.getByRole("status")).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await widget
+    .getByRole("button", { name: "复制诊断（不含聊天内容）" })
+    .click();
+  const report = await widget
+    .getByRole("textbox", { name: "结构诊断" })
+    .inputValue();
+  expect(JSON.parse(report)).toMatchObject({
+    version: "0.2.1",
+    reason: "ready",
+    mode: true,
+    scopedRoleNodes: 2,
+  });
+  expect(report).not.toContain("sensitive");
+  expect(report).not.toContain("private-native");
+  await chat.evaluate(() => {
+    document
+      .querySelector("[data-message-id]")!
+      .removeAttribute("data-message-id");
+  });
+  await expect(widget.getByRole("status")).toContainText("缺少会话标识");
+  await widget
+    .getByRole("button", { name: "复制诊断（不含聊天内容）" })
+    .click();
+  expect(
+    JSON.parse(
+      await widget.getByRole("textbox", { name: "结构诊断" }).inputValue(),
+    ).reason,
+  ).toBe("session-id-missing");
+  panel.on("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
+  await expect(
+    panel.getByRole("button", { name: "我了解并同意本地保存" }),
+  ).toBeVisible();
+  await chat.close();
+  await panel.close();
+  await browser.unroute("https://chatgpt.com/**");
+});

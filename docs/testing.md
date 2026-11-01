@@ -2,6 +2,10 @@
 
 macOS Apple Silicon / Node.js 22 / Chrome MV3 生产构建。全部自动化测试只使用合成内容，运行于 Playwright 独立临时浏览器 profile，不读取用户 Chrome 数据。
 
+## 0.2.1 修复验证
+
+新增祖先/子节点消息 id、role=main 容器、非 article turn 容器，以及无聊天内容的结构诊断测试。单元测试 **29/29 通过**，类型检查、构建与打包通过；浏览器测试 **7/7 通过**（22.0 秒），同时验证该结构的自动保存与诊断输出。真实用户页面仍待用诊断信息确认，不能将合成回归通过写成真实问题已修复。
+
 ## 0.2.0 最终执行结果
 
 2026-11-02：`npm run typecheck` 通过；`npm test` **26/26 通过**；`npm run build` 通过；`npm run test:browser` **6/6 通过**（21.2 秒）；`npm run zip` 通过（86.63 KB）；`npm audit` **0 个已知漏洞**。真实账号兼容性尚未验收。

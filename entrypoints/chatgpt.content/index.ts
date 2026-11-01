@@ -9,7 +9,7 @@ export default defineContentScript({
     const host = document.createElement("div");
     host.id = "keeptemp-status";
     const shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = `<style>:host{position:fixed;bottom:18px;right:18px;z-index:2147483647;font:12px -apple-system,sans-serif;color:#214331}section{background:#f5f8f1;border:1px solid #c9d7c8;border-radius:12px;padding:10px 12px;box-shadow:0 3px 18px #0002;max-width:290px}p{margin:0;line-height:1.6}button{font:inherit;margin:7px 6px 0 0;padding:4px 8px;border:1px solid #c9d7c8;border-radius:6px;color:#214331;background:white;cursor:pointer}small{display:block;margin-top:5px;color:#657361}button:disabled{opacity:.5}</style><section><p role="status">KeepTemp · 正在检查授权</p><div hidden><button id="pause">暂停</button><button id="exclude">排除此会话</button></div><small>只保存可见文字 · 不恢复附件</small></section>`;
+    shadow.innerHTML = `<style>:host{position:fixed;bottom:18px;right:18px;z-index:2147483647;font:12px -apple-system,sans-serif;color:#214331}section{background:#f5f8f1;border:1px solid #c9d7c8;border-radius:12px;padding:10px 12px;box-shadow:0 3px 18px #0002;max-width:290px}p{margin:0;line-height:1.6}button{font:inherit;margin:7px 6px 0 0;padding:4px 8px;border:1px solid #c9d7c8;border-radius:6px;color:#214331;background:white;cursor:pointer}small{display:block;margin-top:5px;color:#657361}button:disabled{opacity:.5}</style><section><p role="status">KeepTemp · 正在检查授权</p><div hidden><button id="pause">暂停</button><button id="exclude">排除此会话</button></div><small>只保存可见文字 · 不恢复附件</small><button id="diagnostic">复制诊断（不含聊天内容）</button><textarea aria-label="结构诊断" readonly hidden style="width:260px;height:130px;margin-top:6px"></textarea></section>`;
     document.documentElement.append(host);
     const label = shadow.querySelector("p")!,
       controls = shadow.querySelector("div")!,
@@ -73,6 +73,20 @@ export default defineContentScript({
         busy = false;
       }
     };
+    shadow.querySelector<HTMLButtonElement>("#diagnostic")!.onclick =
+      async () => {
+        const report = JSON.stringify(adapter.diagnose(), null, 2);
+        const output = shadow.querySelector<HTMLTextAreaElement>("textarea")!;
+        output.hidden = false;
+        output.value = report;
+        output.focus();
+        output.select();
+        try {
+          await navigator.clipboard.writeText(report);
+        } catch {
+          /* Selected text remains available for manual copy. */
+        }
+      };
     const observer = new MutationObserver((records) => {
       if (records.some((r) => !host.contains(r.target))) {
         dirty = true;
@@ -112,11 +126,18 @@ export default defineContentScript({
         if (!s || s.temporary !== true || !s.messages.length) {
           controls.hidden = true;
           activeId = "";
-          say(
-            s?.temporary === false
-              ? "普通聊天，不保存"
-              : "等待可识别的 Temporary 对话",
-          );
+          const reasons: Record<string, string> = {
+            regular: "普通聊天，不保存",
+            "mode-unknown": "未识别到临时模式，请点击复制诊断",
+            "outside-main": "消息在不同页面区域，请点击复制诊断",
+            "message-markers-missing": "未找到对话节点，请点击复制诊断",
+            "user-message-missing": "临时模式已识别，等待用户消息",
+            "session-id-missing":
+              "临时模式已识别，但缺少会话标识，请点击复制诊断",
+            "message-id-missing":
+              "临时模式已识别，但缺少消息标识，请点击复制诊断",
+          };
+          say(reasons[adapter.diagnose().reason] ?? "等待对话内容");
           return;
         }
         if (activeId !== s.id) {
