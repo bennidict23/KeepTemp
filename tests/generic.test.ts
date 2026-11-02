@@ -2,7 +2,14 @@ import { describe, it, expect } from "vitest";
 import { GenericChatAdapter } from "../src/generic-adapter";
 import { StorageRepository } from "../src/storage";
 import { validSnapshot, scopedChatId } from "../src/bridge";
-import { genericFixture, genericTurn, deepseekFixture } from "./fixtures";
+import {
+  genericFixture,
+  genericTurn,
+  deepseekFixture,
+  otherProviders,
+  providerFixture,
+  shell,
+} from "./fixtures";
 import type { Snapshot } from "../src/model";
 function adapter(
   html = genericFixture(),
@@ -189,7 +196,12 @@ describe("explicit per-conversation persistence", () => {
     expect(await r.capture({ ...snap(), temporary: false }, true)).toBe(true);
     expect(
       await r.capture(
-        { ...snap("thread:builtin"), source: "chatgpt", temporary: false },
+        {
+          ...snap("thread:builtin"),
+          source: "chatgpt",
+          captureMode: undefined,
+          temporary: false,
+        },
         true,
       ),
     ).toBe(false);
@@ -250,5 +262,66 @@ describe("explicit per-conversation persistence", () => {
     expect(await r.genericCount()).toBe(0);
     expect(await r.list()).toEqual([]);
     await r.close();
+  });
+});
+
+describe("built-in explicit capture shares the existing session identity", () => {
+  it("keeps explicit authorization and metadata when automatic mode later becomes recognizable", async () => {
+    const r = new StorageRepository(crypto.randomUUID());
+    await r.authorize();
+    const first = {
+      ...snap("grok:1:thread:native"),
+      source: "grok" as const,
+      sourceOrigin: "https://grok.com",
+    };
+    expect(await r.capture(first, true)).toBe(true);
+    expect(await r.autoCapture("grok")).toBe(false);
+    const automatic = {
+      ...first,
+      captureMode: undefined,
+      sourceOrigin: undefined,
+      temporary: true,
+      messages: first.messages.map((m) => ({
+        ...m,
+        text: "later",
+        updatedAt: 2,
+      })),
+    };
+    expect(await r.capture(automatic)).toBe(true);
+    expect(await r.list()).toHaveLength(1);
+    expect((await r.list())[0]).toMatchObject({
+      source: "grok",
+      captureMode: "explicit",
+      sourceOrigin: "https://grok.com",
+    });
+    await r.setAutoCapture(false);
+    await r.setAutoCapture(true);
+    expect(await r.capture(automatic)).toBe(false); // global on does not reauthorize explicit copies
+    await r.close();
+  });
+});
+
+describe("manual platform previews never invent temporary mode", () => {
+  it.each(otherProviders)("previews $0 without privacy markers", (source) => {
+    const fixture = providerFixture(source);
+    const html = fixture.html.replace(/<header>[\s\S]*?<\/header>/, "");
+    const result = adapter(html, fixture.url).engine.inspect();
+    expect(result).toMatchObject({
+      reason: "ready",
+      method: "platform-layout",
+      snapshot: { temporary: null, captureMode: "explicit" },
+    });
+    expect(result.snapshot?.messages).toHaveLength(2);
+  });
+  it("previews the ChatGPT app shell without temporary query", () => {
+    const result = adapter(
+      shell(),
+      "https://chatgpt.com/c/synthetic",
+    ).engine.inspect();
+    expect(result).toMatchObject({
+      reason: "ready",
+      method: "platform-layout",
+      snapshot: { temporary: null },
+    });
   });
 });

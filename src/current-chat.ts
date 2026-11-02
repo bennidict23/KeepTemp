@@ -89,8 +89,18 @@ export async function prepareCurrentChat(
     throw new CurrentChatError("use-toolbar");
   const url = new URL(tab.url);
   if (platformFromUrl(url)) {
-    await recordCurrentChat(repo);
-    return null;
+    try {
+      await recordCurrentChat(repo);
+      return null;
+    } catch (error) {
+      // Explicit recording may fall back to a reviewed copy; automatic temporary
+      // capture still refuses normal/unknown mode. Never bypass pause/deletion/errors.
+      if (
+        !(error instanceof CurrentChatError) ||
+        !["regular", "temporary-unknown", "no-content"].includes(error.code)
+      )
+        throw error;
+    }
   }
   if (
     url.protocol !== "https:" ||

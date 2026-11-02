@@ -1,3 +1,4 @@
+import { createPlatformPreviewAdapter } from "./platform-adapter";
 import { plainText, visible } from "./chatgpt-adapter";
 import type { Message, Role, Snapshot } from "./model";
 
@@ -11,7 +12,7 @@ export type GenericReason =
 export interface GenericInspection {
   reason: GenericReason;
   snapshot?: Snapshot;
-  method: "semantic" | "deepseek-layout";
+  method: "semantic" | "deepseek-layout" | "platform-layout";
 }
 const roleSelector =
   "[data-message-author-role],[data-message-role],[data-author-role],[data-role]";
@@ -73,23 +74,39 @@ export class GenericChatAdapter {
   private anchor = "";
   private known = new Set<string>();
   private route = "";
+  private platformPreview;
   constructor(
     private doc: Document,
     private location: () => URL,
-  ) {}
+  ) {
+    this.platformPreview = createPlatformPreviewAdapter(doc, location);
+  }
   inspect(): GenericInspection {
     const url = this.location();
+    if (
+      url.protocol !== "https:" ||
+      /\/(share|shared|public)(\/|$)/i.test(url.pathname)
+    )
+      return { reason: "unsupported-page", method: "semantic" };
+    const platform = this.platformPreview?.read();
+    if (platform?.messages.length)
+      return {
+        reason: "ready",
+        method: "platform-layout",
+        snapshot: {
+          ...platform,
+          source: "generic",
+          sourceOrigin: url.origin,
+          captureMode: "explicit",
+          temporary: null,
+        },
+      };
     const deepseek = url.origin === "https://chat.deepseek.com";
     const method = deepseek ? "deepseek-layout" : "semantic";
     const fail = (reason: GenericReason): GenericInspection => ({
       reason,
       method,
     });
-    if (
-      url.protocol !== "https:" ||
-      /\/(share|shared|public)(\/|$)/i.test(url.pathname)
-    )
-      return fail("unsupported-page");
     const roots = [
       ...this.doc.querySelectorAll<HTMLElement>(
         'main,[role="main"],[role="log"]',

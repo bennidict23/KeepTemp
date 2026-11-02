@@ -179,6 +179,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
   constructor(
     private doc: Document,
     private location: () => URL,
+    private preview = false,
   ) {}
   read(): Snapshot | null {
     const url = this.location();
@@ -188,7 +189,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
     )
       return null;
     const temporary = temporaryMode(this.doc, url);
-    if (temporary !== true)
+    if (temporary !== true && !this.preview)
       return { id: "unknown", source: "chatgpt", temporary, messages: [] };
     const nodes = candidateNodes(this.doc).filter(visible);
     const now = Date.now();
@@ -222,7 +223,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
     return {
       id: `thread:${firstKey}`,
       source: "chatgpt",
-      temporary: true,
+      temporary,
       messages,
     };
   }

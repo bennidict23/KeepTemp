@@ -15,3 +15,5 @@ In the user's terminology, "prompt" means the continuation instructions bundled 
 Claude, Grok and Gemini capture remain experimental until actual-account acceptance. Continuation prompts stay platform-neutral; source labels appear only in the UI and exports.
 
 The user explicitly confirmed on 2026-11-02 that ordinary or unknown-mode conversations may be saved on request, with a clear warning that platform history remains. Generic capture must never silently enable another conversation. Do not promote experimental generic/DeepSeek extraction as universal or live-verified support.
+
+The reviewed explicit-recording fallback applies to built-in sites too. Do not hard-block the manual entry on regular/unknown mode; fall back only for regular, temporary-unknown or no-content. Never bypass paused/excluded/deleted/write failures. Reuse built-in session identities for explicit copies, preserving per-conversation consent and metadata. Toolbar access must be verified with an unmodified shipping manifest, not just pregranted synthetic hosts.

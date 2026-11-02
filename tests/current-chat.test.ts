@@ -207,3 +207,53 @@ describe("generic preview and explicit grants", () => {
     });
   });
 });
+
+describe("built-in manual entry falls back to reviewed recording", () => {
+  it.each(["regular", "temporary-unknown", "no-content"])(
+    "offers preview after %s",
+    async (reason) => {
+      const origin = "https://grok.com";
+      api.tabs.query.mockResolvedValue([
+        { id: 17, url: origin + "/c/synthetic" },
+      ]);
+      api.tabs.sendMessage.mockImplementation(
+        async (_id: number, r: { type: string }) => {
+          if (r.type === "keeptemp:inspect-current" && reason !== "no-content")
+            return { ok: false, error: reason };
+          if (r.type === "keeptemp:record-current")
+            return { ok: false, error: reason };
+          if (r.type === "keeptemp:generic-preview")
+            return {
+              ok: true,
+              preview: { ...preview, origin, method: "platform-layout" },
+            };
+          return { ok: true };
+        },
+      );
+      expect(await prepareCurrentChat(repo())).toMatchObject({
+        origin,
+        reason: "ready",
+      });
+      expect(api.permissions.request).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["paused", "excluded", "storage-failed"])(
+    "never bypasses %s",
+    async (reason) => {
+      api.tabs.sendMessage.mockImplementation(
+        async (_id: number, r: { type: string }) =>
+          r.type === "keeptemp:record-current"
+            ? { ok: false, error: reason }
+            : { ok: true },
+      );
+      await expect(prepareCurrentChat(repo())).rejects.toMatchObject({
+        code: reason,
+      });
+      expect(
+        api.tabs.sendMessage.mock.calls.some(
+          (c) => c[1].type === "keeptemp:generic-preview",
+        ),
+      ).toBe(false);
+    },
+  );
+});

@@ -49,3 +49,11 @@
 通用技术边界：可以针对带明确角色与稳定身份的未列出网站复用引擎；无法保证任意网站无需规则即可提取。没有可靠结构时明确拒绝，不把导入或逐轮复制作为核心替代，也不把通用原型宣传成全面支持。
 
 权限参考：[activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab) 在用户调用扩展后授予当前页临时访问；[permissions.request](https://developer.chrome.com/docs/extensions/reference/api/permissions#method-request) 允许在用户操作时请求可选范围的子集。实现将全 HTTPS 范围仅声明为 optional，确认时只请求当前 origin，不默认读取所有网站。Chrome 原生授权弹窗需用户实际验收；浏览器自动化以隔离测试副本中的合成站点权限模拟已授予状态，不能用此宣称弹窗已实测通过。
+
+## 0.5.1 工具栏访问与 Grok 反馈
+
+用户反馈工具栏提示循环，以及 Grok 显示 Private 但插件拒绝识别。第一项已在未修改生产 manifest 的独立 Chromium 中复现：原生工具栏动作只打开侧栏，activeTab 仍不可见；改为 action.onClicked 显式打开后，当前 URL 和通用预览可用，跨 origin 后权限撤回符合预期。
+
+依据 [Chrome activeTab 文档](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab)、[Chrome 团队的侧栏指导](https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/chrome-extensions/references/extensions/side-panel.md) 与 [Chromium 讨论](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/DET2SXCFnDg)，侧栏内点击不等价于调用扩展 action。实现注册真正 action 点击，保持临时授权语义，不改成全站读取。回归用 [Extensions.triggerAction](https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-triggerAction) 触发 Chrome 原生 action，不直接调用应用回调，也不预先赋予测试域名权限。
+
+第二项包含产品路径遗漏：已有适配站点仍被模式检查挡在通用预览之外。0.5.1 已统一主动入口，普通／未知模式也可预览确认。补充 Private 可见选中信号；仅按钮文字不足时不声称已确认隐私。Grok 的真实 DOM 仍需用户验收，但模式未知本身不再阻止主动副本。

@@ -874,3 +874,61 @@ test("DeepSeek synthetic native items can be explicitly recorded without claimin
   expect(copied).toContain("[assistant]\nDeepSeek 增量回复\n保留第二段");
   expect(copied).not.toContain("chat.deepseek.com");
 });
+
+for (const source of ["chatgpt", ...otherProviders] as const) {
+  test(`${source}: manual recording previews normal/unknown mode instead of blocking it`, async () => {
+    const fixture =
+      source === "chatgpt"
+        ? {
+            origin: "https://chatgpt.com",
+            url: "https://chatgpt.com/c/synthetic",
+            html: shell(),
+          }
+        : providerFixture(source);
+    const html = fixture.html.replace(
+      /<header>[\s\S]*?<\/header>/,
+      source === "grok"
+        ? '<header><button aria-label="Private" aria-pressed="false">Private</button></header>'
+        : '<header><button aria-label="Private">Private</button></header>',
+    );
+    await browser.route(fixture.origin + "/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html", body: html }),
+    );
+    if (source === "grok") await enable();
+    const p = await browser.newPage();
+    await p.goto(fixture.url);
+    if (source === "grok")
+      await expect(
+        p.locator("#keeptemp-status").getByRole("status"),
+      ).toContainText("普通聊天，不保存");
+    await previewPage(p);
+    await expect(panel.locator(".preview-messages article")).toHaveCount(2);
+    await expect(panel.locator(".session")).toHaveCount(0);
+    await p.bringToFront();
+    await panel
+      .getByRole("button", { name: "确认并记录此对话", exact: true })
+      .click();
+    await expect(
+      p.locator("#keeptemp-generic-status").getByRole("status"),
+    ).toContainText("Saved");
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.locator(".session").click();
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    await expect(
+      panel.getByText("这是你主动记录的网页对话。", { exact: false }),
+    ).toBeVisible();
+    if (source === "grok")
+      await p.evaluate(() =>
+        document
+          .querySelector("header button")!
+          .setAttribute("aria-pressed", "true"),
+      );
+    await p.reload();
+    await expect(
+      p.locator("#keeptemp-generic-status").getByRole("status"),
+    ).toContainText("Saved");
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    await panel.getByRole("button", { name: "返回", exact: true }).click();
+    await expect(panel.locator(".session")).toHaveCount(1);
+  });
+}

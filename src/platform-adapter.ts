@@ -11,7 +11,7 @@ export interface CaptureAdapter extends PlatformAdapter {
 }
 const terms: Record<Exclude<PlatformId, "chatgpt">, RegExp> = {
   claude: /incognito|隐身|无痕/i,
-  grok: /private chat|private mode|私密聊天|私人聊天/i,
+  grok: /\bprivate(?: chat| mode)?\b|私密(?:聊天)?|私人聊天/i,
   gemini: /temporary chat|temp.chat|临时聊天|临时对话/i,
 };
 export function privateMode(
@@ -34,6 +34,7 @@ export function privateMode(
           el.getAttribute("title"),
           el.dataset.testid,
           el.getAttribute("data-test-id"),
+          el.closest("header,[data-testid=chat-header]") ? el.textContent : "",
         ].join(" "),
       ),
   );
@@ -66,7 +67,7 @@ export function privateMode(
     return true;
   if (id === "grok" && url.hash === "#private") return true;
   const labels =
-    /^(Incognito(?: chat| mode)?|Private chat|Temporary chat|隐身聊天|无痕聊天|私密聊天|私人聊天|临时聊天|临时对话)$/i;
+    /^(Incognito(?: chat| mode)?|Private(?: chat| mode)?|Temporary chat|隐身聊天|无痕聊天|私密(?:聊天)?|私人聊天|临时聊天|临时对话)$/i;
   for (const el of doc.querySelectorAll<HTMLElement>(
     'header span,header h1,header div,[data-testid="chat-header"] span',
   )) {
@@ -117,6 +118,7 @@ class OtherAdapter implements CaptureAdapter {
     readonly source: Exclude<PlatformId, "chatgpt">,
     private doc: Document,
     private location: () => URL,
+    private preview = false,
   ) {}
   mode() {
     return privateMode(this.source, this.doc, this.location());
@@ -129,7 +131,7 @@ class OtherAdapter implements CaptureAdapter {
     )
       return null;
     const temporary = this.mode();
-    if (temporary !== true)
+    if (temporary !== true && !this.preview)
       return { id: "unknown", source: this.source, temporary, messages: [] };
     const nodes: NodeMessage[] = [];
     let session = "";
@@ -281,7 +283,7 @@ class OtherAdapter implements CaptureAdapter {
     return {
       id: `thread:${session}`,
       source: this.source,
-      temporary: true,
+      temporary,
       messages,
     };
   }
@@ -301,4 +303,15 @@ export function createPlatformAdapter(
     };
   }
   return new OtherAdapter(provider.id, doc, location);
+}
+
+// Called only for a user-requested preview. It never enables automatic capture.
+export function createPlatformPreviewAdapter(
+  doc: Document,
+  location: () => URL,
+) {
+  const source = platformFromUrl(location())?.id;
+  if (!source) return null;
+  if (source === "chatgpt") return new ChatGPTAdapter(doc, location, true);
+  return new OtherAdapter(source, doc, location, true);
 }

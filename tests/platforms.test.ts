@@ -170,3 +170,16 @@ describe("platform boundaries and permission migration", () => {
     }
   });
 });
+
+it("Grok recognizes a selected Private control, but never an unselected activation button", () => {
+  const { adapter } = setup("grok");
+  document.querySelector("header")!.innerHTML =
+    '<button aria-label="Private" aria-pressed="true">Private</button>';
+  expect(adapter.mode()).toBe(true);
+  document
+    .querySelector("header button")!
+    .setAttribute("aria-pressed", "false");
+  expect(adapter.mode()).toBe(false);
+  document.querySelector("header button")!.removeAttribute("aria-pressed");
+  expect(adapter.mode()).toBe(null);
+});

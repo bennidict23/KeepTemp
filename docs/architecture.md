@@ -53,3 +53,14 @@ DOM 和模式信号依赖平台布局，三家新增适配尚待真实账号验�
 generic.content 的 WXT registration=runtime、matches=[]，避免构建器从兜底匹配自动扩大默认 host 权限。optional_host_permissions 只声明 https://*/* 的可申请范围；确认成功后仅注册已授予的精确 origin。脚本刷新后检查本地授权和已批准的会话 ID，再恢复同一段；新会话没有写入授权。动态注册失败不会把已持久化记录说成丢失，用户可手动重新接管。
 
 DeepSeek 的实验 DOM 分支使用 ds-message、ds-markdown、原生 /a/chat/s/<id> 与 virtual-list-item-key。后一种键仅在已确定原生会话时接受。角色是布局推断，预览中明确标注实验并要求核对；原生临时模式没有确认。不能宣称这是稳定接口或全站任意适配。完整网页重启、布局变化和没有共同锚点仍有边界。
+
+
+## 0.5.1 工具栏与统一主动记录修正
+
+原 openPanelOnActionClick=true 路径能打开侧栏，却不授予 activeTab；已用未改 manifest 的 Chromium 原生工具栏动作复现。现在设置该行为为 false，注册 action.onClicked，在同一用户手势内同步调用 sidePanel.open；不增加 tabs／默认全站权限。跨 origin 导航仍撤回临时访问，下一次工具栏动作才重新授予。
+
+prepareCurrentChat 在四家原适配返回 regular／temporary-unknown／no-content 时进入同一预览，不再把模式未知当作主动记录禁令；暂停、排除、存储错误等保持拒绝。createPlatformPreviewAdapter 仅在用户请求的预览里绕过模式门槛，仍使用同一 DOM、角色与稳定身份校验；默认适配器没有放宽临时自动捕获。
+
+主动脚本使用 keeptemp:generic: 消息命名空间选择 explicit 策略。后台仍由 sender origin 决定实际来源与 origin。已有四家复用原生 scopedChatId，未适配站点仍使用 origin + tab + 路由摘要 + 原生锚点。仓库的 explicit 策略按 captureMode 或已有记录标记决定，和来源标签解耦；首轮 grant 与内容原子写入，后续自动写入保留 explicit 标记和 origin，也检查同一个 grant，避免重复会话或重新扩大授权。内置浮层在主动记录浮层接管时隐藏，DOM 标记只用于停止与隐藏，不能授予写入权限。
+
+Grok 增加 Private／私密字样及带选中状态的可见控制识别。只有“Private”按钮但没有选中证据仍为未知，可进入主动预览，不冒充已经确认隐私模式。实际账号布局仍待验收。

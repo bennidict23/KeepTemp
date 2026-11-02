@@ -1,3 +1,4 @@
+import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
 import { GenericChatAdapter } from "../src/generic-adapter";
 import type { GenericPreview } from "../src/generic-preview";
@@ -24,7 +25,9 @@ export default defineContentScript({
     const say = (text: string) => {
       if (!host) {
         host = document.createElement("div");
-        host.id = "keeptemp-status";
+        host.id = platformFromUrl(location.href)
+          ? "keeptemp-generic-status"
+          : "keeptemp-status";
         const shadow = host.attachShadow({ mode: "open" });
         shadow.innerHTML =
           '<style>:host{position:fixed;right:18px;bottom:18px;z-index:2147483647;font:12px system-ui;color:#35533e}section{max-width:300px;padding:10px 12px;background:#f7f9f3;border:1px solid #d7e0d0;border-radius:12px;box-shadow:0 3px 14px #0001}p{margin:0;line-height:1.6}small{display:block;font-size:10px;color:#6d7868}button{font:inherit;color:inherit;background:none;border:1px solid #d7e0d0;border-radius:6px;margin-top:6px;cursor:pointer;padding:3px 8px}</style><section><p role="status"></p><small>本地副本 · 不改变网站历史</small><button id="pause" aria-label="暂停记录">暂停</button></section>';
@@ -47,7 +50,7 @@ export default defineContentScript({
             try {
               const current = await send("keeptemp:state", undefined, activeId);
               const result = (await browser.runtime.sendMessage({
-                type: "keeptemp:pause",
+                type: "keeptemp:generic:pause",
                 id: activeId,
                 paused: !current.paused,
               })) as BridgeResponse;
@@ -72,6 +75,7 @@ export default defineContentScript({
           };
       }
       host.shadowRoot!.querySelector("p")!.textContent = `KeepTemp · ${text}`;
+      host.dataset.recording = String(Boolean(activeId));
       host.dataset.state = text.includes("Saved")
         ? "saved"
         : text.includes("失败")
@@ -80,7 +84,8 @@ export default defineContentScript({
     };
     const read = async () => {
       const inspection = adapter.inspect();
-      if (!inspection.snapshot) return inspection;
+      if (!inspection.snapshot || platformFromUrl(location.href))
+        return inspection;
       // SHA-256 keeps route scope stable without persisting a potentially private URL.
       const route = location.pathname + location.search;
       const bytes = await crypto.subtle.digest(
@@ -95,7 +100,7 @@ export default defineContentScript({
     };
     const send = (type: string, snapshot?: Snapshot, id?: string) =>
       browser.runtime.sendMessage({
-        type,
+        type: type.replace("keeptemp:", "keeptemp:generic:"),
         snapshot,
         id,
       }) as Promise<BridgeResponse>;

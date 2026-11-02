@@ -79,15 +79,14 @@ export class StorageRepository {
     return (await this.db).get("sessions", id);
   }
   async capture(snapshot: Snapshot, enableCapture = false) {
-    const generic = snapshot.source === "generic";
+    const requestedExplicit = snapshot.captureMode === "explicit";
     if (
       !snapshot.messages.length ||
-      (generic
-        ? snapshot.captureMode !== "explicit"
-        : snapshot.temporary !== true)
+      (snapshot.source === "generic" && !requestedExplicit) ||
+      (!requestedExplicit && snapshot.temporary !== true)
     )
       return false;
-    if (generic) {
+    if (requestedExplicit) {
       try {
         const origin = new URL(snapshot.sourceOrigin!);
         if (
@@ -106,32 +105,28 @@ export class StorageRepository {
         await tx.done;
         return false;
       }
-      if (
-        isPlatform(snapshot.source) &&
-        !enableCapture &&
-        !(await tx.objectStore("meta").get(captureKey(snapshot.source)))
-      ) {
-        await tx.done;
-        return false;
-      }
-      if (
-        generic &&
-        !enableCapture &&
-        !(await tx.objectStore("meta").get(`generic-grant:${snapshot.id}`))
-      ) {
-        await tx.done;
-        return false;
-      }
       const store = tx.objectStore("sessions");
       const old = await store.get(snapshot.id);
       if (old?.excluded || old?.deleted || old?.paused) {
         await tx.done;
         return false;
       }
-      if (enableCapture && isPlatform(snapshot.source))
-        await tx.objectStore("meta").put(true, captureKey(snapshot.source));
-      if (generic && enableCapture)
+      const explicit = requestedExplicit || old?.captureMode === "explicit";
+      if (!enableCapture) {
+        const key = explicit
+          ? `generic-grant:${snapshot.id}`
+          : isPlatform(snapshot.source)
+            ? captureKey(snapshot.source)
+            : null;
+        if (key && !(await tx.objectStore("meta").get(key))) {
+          await tx.done;
+          return false;
+        }
+      }
+      if (enableCapture && explicit)
         await tx.objectStore("meta").put(true, `generic-grant:${snapshot.id}`);
+      else if (enableCapture && isPlatform(snapshot.source))
+        await tx.objectStore("meta").put(true, captureKey(snapshot.source));
       const messages = new Map(old?.messages.map((m) => [m.id, m]));
       const incoming = [...snapshot.messages].sort((a, b) => a.order - b.order);
       const ordered = [...messages.values()]
@@ -163,9 +158,11 @@ export class StorageRepository {
       await store.put({
         id: snapshot.id,
         source: snapshot.source ?? "mock",
-        ...(generic
+        ...(explicit
           ? {
-              sourceOrigin: snapshot.sourceOrigin,
+              sourceOrigin: requestedExplicit
+                ? snapshot.sourceOrigin
+                : old?.sourceOrigin,
               captureMode: "explicit" as const,
             }
           : {}),

@@ -7,7 +7,7 @@ export interface GenericPreview {
   id: string;
   messages: Message[];
   reason: GenericReason;
-  method: "semantic" | "deepseek-layout";
+  method: "semantic" | "deepseek-layout" | "platform-layout";
 }
 export function genericReason(reason: GenericReason) {
   return {

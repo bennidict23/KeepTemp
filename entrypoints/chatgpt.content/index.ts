@@ -167,6 +167,14 @@ export default defineContentScript({
       if (busy || !ctx.isValid) return { ok: false, error: "busy" };
       busy = true;
       try {
+        if (
+          document.getElementById("keeptemp-generic-status")?.dataset
+            .recording === "true"
+        ) {
+          host.hidden = true;
+          return { ok: false, error: "explicit-recording" };
+        }
+        host.hidden = false;
         if (force || Date.now() - lastState > 1200) {
           await state(activeId || undefined);
           lastState = Date.now();

@@ -9,8 +9,14 @@ import {
 } from "../src/bridge";
 export default defineBackground(() => {
   const repo = new StorageRepository();
-  browser.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
+  // Native side-panel auto-opening does not grant activeTab. Handle the real
+  // action so Chrome grants it, then open synchronously within that user gesture.
+  browser.action.onClicked.addListener((tab) => {
+    if (tab.windowId !== undefined)
+      void browser.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+  });
+  void browser.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: false })
     .catch(() => {});
   browser.runtime.onMessage.addListener(
     (request: unknown, sender, sendResponse) => {
@@ -35,8 +41,12 @@ export default defineBackground(() => {
       }
       const tabId = sender.tab.id;
       const origin = new URL(sender.url).origin;
+      const explicit = request.type.startsWith("keeptemp:generic:");
+      const type = explicit
+        ? request.type.replace("keeptemp:generic:", "keeptemp:")
+        : request.type;
       const platform = platformFromUrl(sender.url)?.id ?? "generic";
-      const generic = platform === "generic";
+      const generic = platform === "generic" || explicit;
       const scope = (id: string) => scopedChatId(tabId, id, platform, origin);
       const data = request as Record<string, unknown>;
       // Keep the channel alive on Chrome versions without Promise-returning listeners.
@@ -54,14 +64,21 @@ export default defineBackground(() => {
               ? data.id
               : null;
           const localConsent = await repo.consent();
+          const currentSession = rawId
+            ? await repo.get(scope(rawId))
+            : undefined;
           const consent =
             localConsent &&
             (generic
               ? rawId
                 ? await repo.genericAllowed(scope(rawId))
                 : true
-              : await repo.autoCapture(platform));
-          if (data.type === "keeptemp:start-current") {
+              : currentSession?.captureMode === "explicit"
+                ? await repo.genericAllowed(scope(rawId!))
+                : await repo.autoCapture(
+                    platform as Exclude<typeof platform, "generic">,
+                  ));
+          if (type === "keeptemp:start-current") {
             if (!(await repo.consent()))
               return { ok: false, error: "consent-required" };
             if (!validSnapshot(data.snapshot, generic))
@@ -88,7 +105,7 @@ export default defineBackground(() => {
             }
             return { ok: true, consent: true, saved: true };
           }
-          if (generic && data.type === "keeptemp:state") {
+          if (generic && type === "keeptemp:state") {
             const session = rawId ? await repo.get(scope(rawId)) : undefined;
             return {
               ok: true,
@@ -99,7 +116,7 @@ export default defineBackground(() => {
           }
           if (!consent && !generic)
             return { ok: true, consent: false, saved: false };
-          if (data.type === "keeptemp:capture") {
+          if (type === "keeptemp:capture") {
             if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
             const snapshot = data.snapshot;
@@ -119,9 +136,9 @@ export default defineBackground(() => {
             data.id.length <= 600
               ? scope(data.id)
               : null;
-          if (data.type === "keeptemp:exclude" && id) await repo.delete(id); // content-free permanent exclusion, including before first write
+          if (type === "keeptemp:exclude" && id) await repo.delete(id); // content-free permanent exclusion, including before first write
           if (
-            data.type === "keeptemp:pause" &&
+            type === "keeptemp:pause" &&
             id &&
             typeof data.paused === "boolean"
           )
