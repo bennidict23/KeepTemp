@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import type { StorageRepository } from "../../src/storage";
 import type { Session } from "../../src/model";
 import { context, json, longContext, markdown } from "../../src/recovery";
-import { currentChatError, recordCurrentPage } from "../../src/current-chat";
+import {
+  continueInChatGPT,
+  currentChatError,
+  recordCurrentPage,
+} from "../../src/current-chat";
 import "./embedded.css";
 
 type Props = {
@@ -263,6 +267,21 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   <button
                     className="embedded-primary"
                     disabled={busy || !interactive}
+                    aria-label="新建临时聊天并接续"
+                    title="将完整记录发送到新的 ChatGPT 临时聊天"
+                    onClick={() =>
+                      run(
+                        () => continueInChatGPT(current.id),
+                        "已在新的 ChatGPT 临时聊天发送接续背景。",
+                        true,
+                      )
+                    }
+                  >
+                    接着聊 ↗
+                  </button>
+                  <button
+                    disabled={busy || !interactive}
+                    aria-label="复制并接续"
                     onClick={() =>
                       run(
                         () => copy(current),
@@ -270,7 +289,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                       )
                     }
                   >
-                    复制并接续
+                    复制
                   </button>
                   <a
                     href="https://chatgpt.com/?temporary-chat=true"
@@ -290,7 +309,8 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   </details>
                 </div>
                 <p className="embedded-caption">
-                  这是本机保存的文字记录。接续会使用新聊天，不恢复原服务端会话。
+                  「接着聊」会把完整文字发送到新的 ChatGPT
+                  临时聊天，不恢复原服务端会话。
                 </p>
                 {longContext(current) && (
                   <p className="embedded-caption">
@@ -323,7 +343,8 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
             <div className="embedded-onboarding">
               <p>给自己的对话留一份。</p>
               <p className="embedded-caption">
-                文字保存在当前浏览器，不上传。不会隐藏网站历史；数据库未加密，卸载扩展可能丢失记录。
+                文字保存在当前浏览器，不上传到 KeepTemp
+                服务器。不会隐藏网站历史；数据库未加密，卸载扩展可能丢失记录。
               </p>
               <button
                 className="embedded-primary"

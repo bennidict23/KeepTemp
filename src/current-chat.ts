@@ -17,6 +17,20 @@ export function currentChatError(error: unknown) {
     "not-chatgpt":
       "请先切换到 HTTPS 聊天网页，再从浏览器工具栏打开 KeepTemp；共享链接不保存。",
     "consent-required": "请先同意本地保存，再记录当前会话。",
+    "handoff-mode-unconfirmed":
+      "未发送：无法确认新页面已进入临时模式。可使用复制并接续。",
+    "handoff-draft-exists": "未发送：新页面已有输入，已保留你的文字。",
+    "handoff-needs-action":
+      "未发送：新窗口有待处理的提示，请先完成登录或临时模式选择。",
+    "handoff-page-changed": "未发送：新页面或输入内容已改变，请检查新窗口。",
+    "handoff-cancelled": "未发送：本地授权或原记录已改变，请重新打开记录。",
+    "handoff-editor-unavailable":
+      "未发送：暂不支持这个输入框或发送按钮，请使用复制并接续。",
+    "handoff-send-unconfirmed":
+      "已点击发送，但未能确认网页接收。请检查新窗口，避免重复发送。",
+    "handoff-unavailable":
+      "无法完成自动接续，请检查新窗口；仍可使用复制并接续。",
+    "handoff-busy": "这段记录正在接续，请查看已打开的新窗口。",
     "site-access":
       "无法访问当前页面。请在扩展设置中允许访问当前平台的网站；无需刷新或关闭聊天。",
     regular: "当前页面不是临时聊天，未保存。",
@@ -37,6 +51,19 @@ export function currentChatError(error: unknown) {
     "unsupported-page": "此页面不适合记录；共享链接和非 HTTPS 页面不保存。",
   };
   return messages[code] ?? "暂未保存成功。请保留当前页面，稍后重试。";
+}
+export async function continueInChatGPT(id: string) {
+  let result: { ok: boolean; error?: string };
+  try {
+    result = await browser.runtime.sendMessage({
+      type: "keeptemp:continue",
+      id,
+    });
+  } catch {
+    throw new CurrentChatError("handoff-unavailable");
+  }
+  if (!result?.ok)
+    throw new CurrentChatError(result?.error ?? "handoff-unavailable");
 }
 export async function recordCurrentChat(
   repo: Pick<StorageRepository, "consent">,

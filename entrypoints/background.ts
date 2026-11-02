@@ -1,6 +1,7 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
 import { StorageRepository } from "../src/storage";
+import { context } from "../src/recovery";
 import {
   validSnapshot,
   scopedChatId,
@@ -9,6 +10,84 @@ import {
 } from "../src/model";
 export default defineBackground(() => {
   const repo = new StorageRepository();
+  const continuations = new Map<
+    number,
+    {
+      token: string;
+      id: string;
+      text: string;
+      phase: "new" | "filled" | "sent";
+    }
+  >();
+  const opening = new Set<string>();
+  async function continueChat(id: string) {
+    if (opening.has(id)) return { ok: false, error: "handoff-busy" };
+    opening.add(id);
+    let tabId: number | undefined;
+    try {
+      const record = await repo.get(id);
+      if (
+        !(await repo.consent()) ||
+        !record ||
+        record.deleted ||
+        !record.messages.length
+      )
+        return { ok: false, error: "handoff-cancelled" };
+      const text = context(record);
+      const tab = await browser.tabs.create({
+        url: "about:blank",
+        active: true,
+      });
+      tabId = tab.id;
+      if (tabId === undefined) throw Error();
+      const token = crypto.randomUUID();
+      continuations.set(tabId, { token, id, text, phase: "new" });
+      await browser.tabs.update(tabId, {
+        url: "https://chatgpt.com/?temporary-chat=true",
+      });
+      const deadline = Date.now() + 15000;
+      while (true) {
+        const current = await browser.tabs.get(tabId);
+        if (
+          current.status === "complete" &&
+          current.url !== "about:blank" &&
+          !current.pendingUrl
+        )
+          break;
+        if (Date.now() > deadline) throw Error();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      const current = await browser.tabs.get(tabId);
+      if (
+        !current.url ||
+        new URL(current.url).origin !== "https://chatgpt.com" ||
+        new URL(current.url).pathname !== "/"
+      )
+        return { ok: false, error: "handoff-page-changed" };
+      await browser.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        files: ["/content-scripts/capture.js"],
+      });
+      return (
+        (await browser.tabs.sendMessage(
+          tabId,
+          { type: "keeptemp:submit-continuation", token, text },
+          { frameId: 0 },
+        )) ?? { ok: false, error: "handoff-unavailable" }
+      );
+    } catch {
+      return {
+        ok: false,
+        error:
+          continuations.get(tabId ?? -1)?.phase === "sent"
+            ? "handoff-send-unconfirmed"
+            : "handoff-unavailable",
+      };
+    } finally {
+      if (tabId !== undefined) continuations.delete(tabId);
+      opening.delete(id);
+    }
+  }
   // Native side-panel auto-opening does not grant activeTab. Handle the real
   // action so Chrome grants it, then open synchronously within that user gesture.
   browser.action.onClicked.addListener((tab) => {
@@ -72,6 +151,22 @@ export default defineBackground(() => {
         !request.type.startsWith("keeptemp:")
       )
         return;
+      if (request.type === "keeptemp:continue") {
+        const data = request as { id?: unknown };
+        if (
+          sender.id !== browser.runtime.id ||
+          !sender.url?.startsWith(browser.runtime.getURL("/")) ||
+          typeof data.id !== "string" ||
+          data.id.length > 1200
+        ) {
+          sendResponse({ ok: false, error: "invalid-source" });
+          return false;
+        }
+        void continueChat(data.id).then(sendResponse, () =>
+          sendResponse({ ok: false, error: "handoff-unavailable" }),
+        );
+        return true;
+      }
       // Top-frame scripts only; unknown HTTPS origins also require an explicit host grant below.
       if (
         sender.id !== browser.runtime.id ||
@@ -85,6 +180,35 @@ export default defineBackground(() => {
       }
       const tabId = sender.tab.id;
       const origin = new URL(sender.url).origin;
+      if (request.type === "keeptemp:handoff-check") {
+        const data = request as { token?: unknown; step?: unknown };
+        const job = continuations.get(tabId);
+        if (
+          origin !== "https://chatgpt.com" ||
+          !job ||
+          job.token !== data.token ||
+          (data.step !== "fill" && data.step !== "send")
+        ) {
+          sendResponse({ ok: false });
+          return false;
+        }
+        void (async () => {
+          const session = await repo.get(job.id);
+          const phase = data.step === "fill" ? "new" : "filled";
+          if (
+            !session ||
+            session.deleted ||
+            !(await repo.consent()) ||
+            context(session) !== job.text ||
+            continuations.get(tabId) !== job ||
+            job.phase !== phase
+          )
+            return { ok: false };
+          job.phase = data.step === "fill" ? "filled" : "sent";
+          return { ok: true };
+        })().then(sendResponse, () => sendResponse({ ok: false }));
+        return true;
+      }
       const explicit = request.type.startsWith("keeptemp:generic:");
       const type = explicit
         ? request.type.replace("keeptemp:generic:", "keeptemp:")

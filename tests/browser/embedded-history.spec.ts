@@ -533,3 +533,258 @@ test("extension history loads with a restrictive parent frame policy", async () 
     .click();
   await expect(reader(p).locator("h1")).toHaveText("合成面试准备");
 });
+
+function continuationPage(kind = "textarea", behavior = "accept") {
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body>
+  <header>${behavior === "unknown" ? "" : '<button data-testid="temporary-chat-button" aria-pressed="true">Temporary</button>'}</header>
+  <main><form>${kind === "textarea" ? `<textarea id="prompt-textarea">${behavior === "draft" ? "用户未发送的合成草稿" : ""}</textarea>` : '<div id="prompt-textarea" contenteditable="true" style="white-space:pre-wrap"></div>'}<button type="button" data-testid="send-button" disabled>Send</button></form></main>
+  <script>
+  const editor = document.getElementById('prompt-textarea'), send = document.querySelector('[data-testid="send-button"]');
+  const read = () => editor.tagName === 'TEXTAREA' ? editor.value : editor.innerText;
+  editor.addEventListener('input', () => {
+    send.disabled = ${behavior === "hold" ? "true" : "!read()"};
+    ${behavior === "mode-change" ? 'document.querySelector("header button").setAttribute("aria-pressed", "false");' : ""}
+  });
+  send.addEventListener('click', () => {
+    document.body.dataset.syntheticSendCount = String(Number(document.body.dataset.syntheticSendCount || '0') + 1);
+    ${behavior === "unconfirmed" ? "return;" : ""}
+    const user = document.createElement('div'); user.dataset.messageAuthorRole = 'user'; user.dataset.messageId = 'synthetic-new-user';
+    const content = document.createElement('p'); content.dataset.userMessageBubble = 'true'; content.textContent = read(); user.append(content); document.querySelector('main').append(user);
+    if (editor.tagName === 'TEXTAREA') editor.value = ''; else editor.textContent = '';
+    send.disabled = true;
+  });
+  </script></body></html>`;
+}
+async function continuationTarget(kind = "textarea", behavior = "accept") {
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body:
+        new URL(route.request().url()).pathname === "/"
+          ? continuationPage(kind, behavior)
+          : nativePage(),
+    }),
+  );
+  await seed();
+  const p = await chat();
+  await list(p)
+    .getByRole("button", { name: "合成面试准备", exact: true })
+    .click();
+  return p;
+}
+async function launchContinuation(p: Page) {
+  const created = browser.waitForEvent("page");
+  await reader(p)
+    .getByRole("button", { name: "新建临时聊天并接续", exact: true })
+    .click();
+  const next = await created;
+  await next.waitForLoadState();
+  return next;
+}
+for (const kind of ["textarea", "contenteditable"]) {
+  test(`one click opens a new temporary ChatGPT tab and sends exact context once through ${kind}`, async () => {
+    const p = await continuationTarget(kind),
+      next = await launchContinuation(p);
+    await expect(next.locator('[data-message-author-role="user"]')).toHaveText(
+      continuation(sample()),
+    );
+    await expect(next.locator("body")).toHaveAttribute(
+      "data-synthetic-send-count",
+      "1",
+    );
+    await expect(
+      next.locator("#keeptemp-continuation-status").getByRole("status"),
+    ).toContainText("已在新临时聊天发送");
+    expect(new URL(next.url()).searchParams.get("temporary-chat")).toBe("true");
+    expect(next.url()).not.toContain("KEEPTEMP_HISTORY");
+    await expect(p.locator("#composer")).toHaveValue("");
+    await expect(reader(p).getByRole("status")).toContainText(
+      "已在新的 ChatGPT 临时聊天发送",
+    );
+  });
+}
+for (const behavior of ["draft", "mode-change", "unknown"]) {
+  test(`automatic continuation refuses ${behavior} without sending`, async () => {
+    const p = await continuationTarget("textarea", behavior),
+      next = await launchContinuation(p);
+    await expect(
+      next.locator("#keeptemp-continuation-status").getByRole("status"),
+    ).toContainText("未发送", { timeout: 20000 });
+    await expect(next.locator('[data-message-author-role="user"]')).toHaveCount(
+      0,
+    );
+    await expect(next.locator("body")).not.toHaveAttribute(
+      "data-synthetic-send-count",
+    );
+    await expect(next.locator("#prompt-textarea")).toHaveValue(
+      behavior === "draft" ? "用户未发送的合成草稿" : "",
+    );
+  });
+}
+for (const kind of ["textarea", "contenteditable"])
+  test(`deleting the source cancels the pending ${kind} send and removes its draft`, async () => {
+    const p = await continuationTarget(kind, "hold"),
+      next = await launchContinuation(p);
+    await expect
+      .poll(() =>
+        next
+          .locator("#prompt-textarea")
+          .evaluate((el) =>
+            el instanceof HTMLTextAreaElement
+              ? el.value
+              : (el as HTMLElement).innerText,
+          ),
+      )
+      .toBe(continuation(sample()));
+    await list(p)
+      .getByRole("button", { name: "会话操作：合成面试准备" })
+      .click();
+    await list(p)
+      .getByRole("menuitem", { name: "删除本机记录", exact: true })
+      .click();
+    await list(p)
+      .getByRole("button", { name: "确认删除", exact: true })
+      .click();
+    await expect.poll(records).toHaveLength(0);
+    await next
+      .locator('[data-testid="send-button"]')
+      .evaluate((node) => ((node as HTMLButtonElement).disabled = false));
+    await expect(
+      next.locator("#keeptemp-continuation-status").getByRole("status"),
+    ).toContainText("未发送");
+    await expect
+      .poll(() =>
+        next
+          .locator("#prompt-textarea")
+          .evaluate((el) =>
+            el instanceof HTMLTextAreaElement
+              ? el.value
+              : (el as HTMLElement).innerText.trim(),
+          ),
+      )
+      .toBe("");
+    await expect(next.locator("body")).not.toHaveAttribute(
+      "data-synthetic-send-count",
+    );
+  });
+test("an unacknowledged send is never retried or reported as accepted", async () => {
+  const p = await continuationTarget("textarea", "unconfirmed"),
+    next = await launchContinuation(p);
+  await expect(
+    next.locator("#keeptemp-continuation-status").getByRole("status"),
+  ).toContainText("未能确认网页接收", { timeout: 20000 });
+  await expect(next.locator("body")).toHaveAttribute(
+    "data-synthetic-send-count",
+    "1",
+  );
+  await expect(reader(p).getByRole("status")).toContainText("未能确认网页接收");
+});
+test("concurrent requests for one record open only one target tab", async () => {
+  await continuationTarget();
+  const before = browser.pages().length;
+  const results = await admin.evaluate(async () => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    return Promise.all([
+      chrome.runtime.sendMessage({
+        type: "keeptemp:continue",
+        id: "local-synthetic",
+      }),
+      chrome.runtime.sendMessage({
+        type: "keeptemp:continue",
+        id: "local-synthetic",
+      }),
+    ]);
+  });
+  expect(results.filter((r) => r?.ok)).toHaveLength(1);
+  expect(results.find((r) => !r?.ok)?.error).toBe("handoff-busy");
+  expect(browser.pages()).toHaveLength(before + 1);
+});
+
+test("website content scripts cannot request an automatic send", async () => {
+  const p = await continuationTarget();
+  const before = browser.pages().length;
+  const result = await admin.evaluate(async (url) => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    const [tab] = await chrome.tabs.query({ url });
+    return chrome.scripting.executeScript({
+      target: { tabId: tab!.id! },
+      func: async () => {
+        const chrome = (
+          globalThis as unknown as {
+            chrome: typeof import("wxt/browser").browser;
+          }
+        ).chrome;
+        return chrome.runtime.sendMessage({
+          type: "keeptemp:continue",
+          id: "local-synthetic",
+        });
+      },
+    });
+  }, p.url());
+  expect(result[0]?.result).toEqual({ ok: false, error: "invalid-source" });
+  expect(browser.pages()).toHaveLength(before);
+});
+
+test("closing a pending target stops it; a later explicit click can start a new task", async () => {
+  const p = await continuationTarget("textarea", "hold"),
+    next = await launchContinuation(p);
+  await expect(next.locator("#prompt-textarea")).toHaveValue(
+    continuation(sample()),
+  );
+  await next.close();
+  await expect(
+    reader(p).getByRole("button", { name: "新建临时聊天并接续" }),
+  ).toBeEnabled();
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body:
+        new URL(route.request().url()).pathname === "/"
+          ? continuationPage()
+          : nativePage(),
+    }),
+  );
+  const retry = await launchContinuation(p);
+  await expect(retry.locator('[data-message-author-role="user"]')).toHaveText(
+    continuation(sample()),
+  );
+  await expect(retry.locator("body")).toHaveAttribute(
+    "data-synthetic-send-count",
+    "1",
+  );
+});
+
+test("automatic continuation never clicks through a platform dialog", async () => {
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body:
+        new URL(route.request().url()).pathname === "/"
+          ? continuationPage().replace(
+              "</main>",
+              '</main><div role="dialog" aria-modal="true">合成平台提示</div>',
+            )
+          : nativePage(),
+    }),
+  );
+  await seed();
+  const p = await chat();
+  await list(p)
+    .getByRole("button", { name: "合成面试准备", exact: true })
+    .click();
+  const next = await launchContinuation(p);
+  await expect(
+    next.locator("#keeptemp-continuation-status").getByRole("status"),
+  ).toContainText("新窗口有待处理的提示");
+  await expect(next.locator("#prompt-textarea")).toHaveValue("");
+  await expect(next.locator("body")).not.toHaveAttribute(
+    "data-synthetic-send-count",
+  );
+});

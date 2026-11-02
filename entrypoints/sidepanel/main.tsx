@@ -10,7 +10,11 @@ import { createRoot } from "react-dom/client";
 import { StorageRepository } from "../../src/storage";
 import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
-import { recordCurrentPage, currentChatError } from "../../src/current-chat";
+import {
+  continueInChatGPT,
+  recordCurrentPage,
+  currentChatError,
+} from "../../src/current-chat";
 import "../../src/style.css";
 import { EmbeddedHistory } from "./embedded";
 const repo = new StorageRepository();
@@ -290,7 +294,10 @@ function App() {
           </p>
           <div className="card">
             <h3>开始之前</h3>
-            <p>对话文字只保存在这台设备，不上传，不需要账号或 API Key。</p>
+            <p>
+              对话文字保存在这台设备，不上传到 KeepTemp 服务器，不需要账号或 API
+              Key。
+            </p>
             <p>
               本地保存不改变网站的历史或数据保留规则。数据库未加密；卸载扩展或清理浏览器可能丢失记录，请按需导出。
             </p>
@@ -326,8 +333,26 @@ function App() {
           </div>
           <h1>{current.title}</h1>
           <div className="toolbar">
+            {destination === "chatgpt" && (
+              <button
+                className="primary"
+                disabled={busy}
+                aria-label="新建临时聊天并接续"
+                onClick={() =>
+                  run(
+                    async () => {
+                      await continueInChatGPT(current.id);
+                    },
+                    "已在新的 ChatGPT 临时聊天发送接续背景。",
+                    "自动接续未完成，请检查新窗口；仍可使用复制并接续。",
+                  )
+                }
+              >
+                接着聊 ↗
+              </button>
+            )}
             <button
-              className="primary"
+              className={destination === "chatgpt" ? "" : "primary"}
               disabled={busy}
               onClick={() =>
                 run(
@@ -368,7 +393,9 @@ function App() {
             </a>
           </div>
           <small>
-            已包含完整历史与接续提示词。请在目标平台先开启临时／隐身模式，再粘贴发送。
+            {destination === "chatgpt"
+              ? "「接着聊」会在新的 ChatGPT 临时聊天发送完整历史与接续提示词；复制操作仅写入剪贴板。"
+              : "已包含完整历史与接续提示词。请在目标平台先开启临时／隐身模式，再粘贴发送。"}
           </small>
           {longContext(current) && (
             <p className="notice">

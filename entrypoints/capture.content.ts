@@ -2,6 +2,8 @@ import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
 import { mountChatGPTHistory } from "../src/chatgpt-history";
+import { submitContinuation } from "../src/continuation";
+import { currentChatError, CurrentChatError } from "../src/current-chat";
 export default defineContentScript({
   matches: [
     "https://chatgpt.com/*",
@@ -15,6 +17,9 @@ export default defineContentScript({
       location.origin === "https://chatgpt.com"
         ? mountChatGPTHistory(ctx)
         : undefined;
+    const submittedTokens = new Set<string>();
+    let continuationNotice: HTMLElement | undefined;
+    ctx.onInvalidated(() => continuationNotice?.remove());
     const adapter = createPlatformAdapter(
       document,
       () => new URL(location.href),
@@ -279,6 +284,59 @@ export default defineContentScript({
         !sender.url?.startsWith(browser.runtime.getURL("/"))
       )
         return;
+      if (request?.type === "keeptemp:submit-continuation") {
+        if (
+          location.origin !== "https://chatgpt.com" ||
+          typeof request.token !== "string" ||
+          typeof request.text !== "string" ||
+          !request.text ||
+          request.text.length > 2_100_000 ||
+          submittedTokens.has(request.token)
+        ) {
+          reply({ ok: false, error: "handoff-cancelled" });
+          return false;
+        }
+        submittedTokens.add(request.token);
+        continuationNotice?.remove();
+        const notice = document.createElement("div");
+        notice.id = "keeptemp-continuation-status";
+        notice.style.cssText =
+          "position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:min(90vw,640px);z-index:2147483647";
+        const shadow = notice.attachShadow({ mode: "open" });
+        shadow.innerHTML =
+          '<style>:host{font:13px/1.6 system-ui}div{display:flex;gap:12px;padding:12px 16px;background:#212121;color:#eee;border:1px solid #666;border-radius:12px}button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit}</style><div><span role="status">KeepTemp · 正在确认临时模式并接续…</span><button aria-label="关闭接续提示">×</button></div>';
+        shadow
+          .querySelector("button")!
+          .addEventListener("click", () => notice.remove());
+        document.body.append(notice);
+        continuationNotice = notice;
+        void submitContinuation(
+          document,
+          () => new URL(location.href),
+          request.text,
+          async (step) =>
+            Boolean(
+              (
+                await browser.runtime.sendMessage({
+                  type: "keeptemp:handoff-check",
+                  token: request.token,
+                  step,
+                })
+              )?.ok,
+            ),
+          ctx.signal,
+        ).then(
+          (result) => {
+            shadow.querySelector('[role="status"]')!.textContent = result.ok
+              ? "KeepTemp · 已在新临时聊天发送接续背景"
+              : currentChatError(new CurrentChatError(result.error));
+            if (result.ok) ctx.setTimeout(() => notice.remove(), 8000);
+            reply(result);
+          },
+          () => reply({ ok: false, error: "handoff-unavailable" }),
+        );
+        return true;
+      }
       if (request?.type === "keeptemp:open-library") {
         reply({ ok: Boolean(history?.open()) });
         return false;
