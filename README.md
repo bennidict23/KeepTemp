@@ -6,23 +6,37 @@
 
 ### Shared AI accounts. Your own local history.<br>Different AI models. One personal library.
 
-Some questions are for AI, not everyone sharing your account.<br>KeepTemp saves temporary conversations in your own browser, so you can find them later and pick up where you left off.
+<a href="https://chatgpt.com"><img src="docs/chatgpt-icon.png" width="24" height="24" alt=""> ChatGPT</a> &nbsp; <a href="https://claude.ai"><img src="docs/claude-icon.svg" width="24" height="24" alt=""> Claude</a>
 
-[**Download**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [Install](#install)
+[**📥 Download**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [Install](#install)
 
-<a href="docs/save-chat.png"><img src="docs/save-chat.png" width="880" alt="The same personal conversation library in the ChatGPT and Claude sidebars"></a>
+</div>
 
-<sub>Your local ChatGPT and Claude records, together. Screenshots use fictional conversations.</sub>
+Sharing a ChatGPT or Claude subscription also means sharing its chat history. Personal worries, work problems, even a basic question you feel awkward asking can end up in someone else's sidebar.
 
-**Save as you chat.** Record temporary conversations continuously, even when you start halfway through.
+You open a temporary or incognito chat to keep it out of the shared history. Then you work out a useful plan or finally explain the background clearly—and want to keep it for yourself.
 
-**Find your own history.** Search, rename, delete, and export Markdown or JSON.
+**KeepTemp is a local conversation library for people sharing AI accounts.** Turn on recording and chat as usual. Your saved text stays in your browser, outside the shared account's history, ready to find and continue later.
 
-**Copy & continue.** Take the full stored conversation and a continuation prompt into a new chat, on either platform.
+<div align="center">
 
-<a href="docs/continue-chat.png"><img src="docs/continue-chat.png" width="960" alt="A saved conversation with Copy & continue and Markdown or JSON export"></a>
+<a href="docs/chatgpt-sidebar.png"><img src="docs/chatgpt-sidebar.png" width="360" alt="KeepTemp local history inside the complete ChatGPT sidebar"></a> &nbsp; <a href="docs/claude-sidebar.png"><img src="docs/claude-sidebar.png" width="270" alt="KeepTemp local history inside the complete Claude sidebar"></a>
 
-<sub>Open a saved chat. Copy the context. Paste and send when you're ready.</sub>
+<sub>KeepTemp inside the ChatGPT and Claude sidebars. Original screenshots, fictional conversations. Click any image to enlarge.</sub>
+
+</div>
+
+- **💾 Save as you chat.** Keep useful temporary conversations with ongoing updates. You can start recording halfway through; saved text remains available after closing the original tab.
+- **🔎 Find your own history.** ChatGPT and Claude share one local library, with source labels and full-text search. Rename or delete through the **⋯** menu, and export Markdown or JSON.
+- **🔁 Copy & continue.** Copy the complete stored transcript and a continuation prompt into a new chat. Stay with the same AI or switch platforms without explaining the background all over again. You choose where to paste and send.
+
+<div align="center">
+
+<a href="docs/local-history.png"><img src="docs/local-history.png" width="960" alt="The full ChatGPT page showing its original sidebar alongside a saved KeepTemp conversation, Copy & continue and export"></a>
+
+<sub>Open a saved conversation inside the ChatGPT interface. Copy the context and continue.</sub>
+
+</div>
 
 No KeepTemp account or API key. No conversation uploads, cloud sync, or analytics.
 
@@ -30,22 +44,16 @@ No KeepTemp account or API key. No conversation uploads, cloud sync, or analytic
 
 Chrome 116+ · Edge · Brave
 
-</div>
-
 1. [Download the ZIP](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) and extract it.
 2. Open `chrome://extensions`, `edge://extensions`, or `brave://extensions`.
 3. Enable **Developer mode** → **Load unpacked** → select the extracted folder containing `manifest.json`.
 
-<div align="center">
-
 **Start:** Enable temporary / incognito mode on the website, open KeepTemp, and choose **Record current chat**. `Saved` confirms the current text is stored locally.
 
-<sub>KeepTemp does not hide or delete website history. Local storage is not encrypted.<br>[Privacy & limits](PRIVACY.md)</sub>
-
-</div>
+<sub>KeepTemp does not hide or delete website history. Local storage is not encrypted. [Privacy & limits](PRIVACY.md)</sub>
 
 <details>
-<summary>Build from source</summary>
+<summary>⚙️ Build from source</summary>
 
 Node.js 22.12+. Run in the project directory:
 
@@ -60,8 +68,4 @@ Load `.output/chrome-mv3` as the unpacked extension. Show hidden folders in the 
 
 </details>
 
-<div align="center">
-
 [Preview build & known limits](docs/development.md#测试方法与边界) · [MIT License](LICENSE)
-
-</div>

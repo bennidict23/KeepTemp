@@ -9,6 +9,7 @@
 - Continuation means complete role-labelled text plus the fixed, platform-neutral continuation prompt. Never silently summarize, truncate, paste or send. Source labels belong in the library and exports.
 - Default interface language is English, with a persistent Chinese toggle. Translate interface text and continuation instructions only, never saved titles or messages.
 - Keep the UI minimal and monochrome, with a persistent light/dark toggle. Privacy boundaries belong in first-use information and settings.
+- README demos must preserve complete user-provided screenshots, including native platform identity and sidebar context. Use proportional display sizing, without cropping or reconstructing the UI.
 - Use synthetic data and isolated browser profiles. Never read private conversations or include real chat text in logs, fixtures or screenshots. Synthetic DOM tests do not establish live-platform compatibility.
 - Verify streaming, repeated recording, deletion/re-recording, refresh, tabs, virtual windows, copy fidelity and storage failures. Follow `docs/development.md`.
 - State privacy and platform limits honestly: local data is not an encrypted vault, local copies do not hide website history, and continuation does not restore server sessions, attachments or tools. See `PRIVACY.md` and `docs/feasibility.md`.
