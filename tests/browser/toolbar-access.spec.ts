@@ -1,7 +1,6 @@
 import {
   test,
   expect,
-  chromium,
   type BrowserContext,
   type Page,
   type CDPSession,
@@ -10,6 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import { genericFixture } from "../fixtures";
+import { launchExtension } from "./launch";
 
 // This suite uses the shipping manifest unchanged: neither test host grants nor
 // mocked Chrome permission APIs may mask toolbar/activeTab integration failures.
@@ -22,15 +22,7 @@ let context: BrowserContext,
 test.beforeAll(async () => {
   profile = await fs.mkdtemp(path.join(os.tmpdir(), "keeptemp-toolbar-"));
   const extension = path.resolve(".output/chrome-mv3");
-  context = await chromium.launchPersistentContext(profile, {
-    channel: "chromium",
-    headless: true,
-    args: [
-      `--disable-extensions-except=${extension}`,
-      `--load-extension=${extension}`,
-      "--enable-unsafe-extension-debugging",
-    ],
-  });
+  context = await launchExtension(profile, extension);
   const worker =
     context.serviceWorkers()[0] ??
     (await context.waitForEvent("serviceworker"));
@@ -106,9 +98,21 @@ async function inspectActivePage() {
   });
 }
 test("native toolbar action grants current-origin access without persisted test host grants", async () => {
+  const nativePanels = async () => {
+    const targets = await cdp.send("Target.getTargets");
+    return targets.targetInfos.filter(
+      (t) =>
+        t.type === "page" &&
+        t.url === `chrome-extension://${extensionId}/sidepanel.html`,
+    ).length;
+  };
+  const panelsBeforeAction = await nativePanels();
   await chat.bringToFront();
   expect(await activeUrl()).toBe(null);
   await toolbarAction();
+  // The existing panel tab is a test controller. A separate target proves the
+  // browser's actual sidebar opened, rather than only rendering the UI in a tab.
+  await expect.poll(nativePanels).toBeGreaterThan(panelsBeforeAction);
   await expect.poll(activeUrl).toBe(chat.url());
   expect(await inspectActivePage()).toMatchObject({
     reason: "ready",

@@ -13,9 +13,9 @@ export function currentChatError(error: unknown) {
     "preview-expired": "网页已切换，请重新点击记录当前对话。",
     "permission-denied": "未获得此网站的访问权限，未保存。",
     "use-toolbar":
-      "请先在聊天标签页点击 Chrome 工具栏的 KeepTemp，再点击记录当前对话。",
+      "请先在聊天标签页点击浏览器工具栏的 KeepTemp，再点击记录当前对话。",
     "not-chatgpt":
-      "请先切换到 HTTPS 聊天网页，再从 Chrome 工具栏打开 KeepTemp；共享链接不保存。",
+      "请先切换到 HTTPS 聊天网页，再从浏览器工具栏打开 KeepTemp；共享链接不保存。",
     "consent-required": "请先同意本地保存，再记录当前会话。",
     "site-access":
       "无法访问当前页面。请在扩展设置中允许访问当前平台的网站；无需刷新或关闭聊天。",

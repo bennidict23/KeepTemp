@@ -5,4 +5,5 @@ export default defineConfig({
   timeout: 30000,
   use: { headless: true },
   reporter: "list",
+  projects: [{ name: process.env.KEEPTEMP_BROWSER ?? "chromium" }],
 });

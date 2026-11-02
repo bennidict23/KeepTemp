@@ -1,13 +1,8 @@
-import {
-  test,
-  expect,
-  chromium,
-  type BrowserContext,
-  type Page,
-} from "@playwright/test";
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import { launchExtension } from "./launch";
 import {
   shell,
   turn,
@@ -39,14 +34,7 @@ test.beforeAll(async () => {
     path.join(extension, "manifest.json"),
     JSON.stringify(manifest),
   );
-  browser = await chromium.launchPersistentContext(profile, {
-    channel: "chromium",
-    headless: true,
-    args: [
-      `--disable-extensions-except=${extension}`,
-      `--load-extension=${extension}`,
-    ],
-  });
+  browser = await launchExtension(profile, extension);
   const worker =
     browser.serviceWorkers()[0] ??
     (await browser.waitForEvent("serviceworker"));

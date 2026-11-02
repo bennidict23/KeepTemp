@@ -52,7 +52,27 @@ WXT、TypeScript、Vitest 和 Playwright 的配置分别服务构建、类型检
 
 Vitest 使用 jsdom 和 fake-indexeddb，覆盖 DOM 身份、合并顺序、事务故障和控制器流程。Playwright 使用独立临时 profile，所有聊天请求返回合成 HTML，不读取私人 Chrome 配置或真实聊天。主要浏览器套件只给测试构建副本增加精确合成站点权限，以验证完整保存闭环。
 
-工具栏套件使用未修改的生产 manifest，通过 Chrome 原生 CDP action 检查 activeTab 授予及跨 origin 撤回，并观察点击记录到达原生权限请求。弹窗等待期间不显示 Saved；测试不代替用户点击原生授权。允许／拒绝由控制器单元测试和精确预授权站点覆盖。
+工具栏套件使用未修改的生产 manifest，通过原生 CDP action 检查 activeTab 授予及跨 origin 撤回，并验证出现独立的原生侧栏页面目标，避免把普通标签页中的 UI 当作侧栏成功。另检查点击记录到达原生权限请求。弹窗等待期间不显示 Saved；测试不代替用户点击原生授权。允许／拒绝由控制器单元测试和精确预授权站点覆盖。
+
+## 浏览器兼容验证
+
+测试共用同一份 `.output/chrome-mv3` 构建。2026-11-02 在 macOS 26.4、Apple Silicon、独立临时 profile 中运行，聊天请求全部由合成页面响应：
+
+| 浏览器         | 版本                              | 回归结果     |
+| -------------- | --------------------------------- | ------------ |
+| Chromium 基线  | 156.0.8078.4                      | 35 / 35 通过 |
+| Microsoft Edge | 156.0.4314.58                     | 35 / 35 通过 |
+| Brave          | 1.98.63（Chromium 156.0.8078.80） | 35 / 35 通过 |
+
+类型检查、114 项单元测试、生产构建与 ZIP 通过。统一浏览器提示文案后的最终构建，在 Edge、Brave 另各补测 4 项核心场景通过，覆盖流式保存、复制导出、原生侧栏和权限请求。
+
+覆盖原生侧栏、工具栏访问、自动及主动保存、流式更新、导航与刷新、复制、导出、删除与重存、清空、主题和写入失败。Windows、Linux 及其他浏览器未做本轮实际运行；共享扩展代码不代表所有系统和旧版本都已验证。Firefox、Safari 当前未适配。
+
+`tests/browser/launch.ts` 默认使用 Playwright 的 Chromium。测试 Edge 或 Brave 时，先设置环境变量 `KEEPTEMP_BROWSER` 为 `edge` 或 `brave`，并将 `KEEPTEMP_BROWSER_PATH` 设为该浏览器可执行文件的完整路径，再运行 `npm run test:browser`；可选 `KEEPTEMP_HEADED=1` 显示测试窗口。不自动安装浏览器，不连接已有 profile。
+
+Chrome 和 Edge 的近期版本移除了命令行扩展加载方式，见 [Playwright 说明](https://playwright.dev/docs/chrome-extensions)。测试通过官方 [CDP Extensions.loadUnpacked](https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-loadUnpacked) 安装扩展，仅对隔离测试实例启用扩展调试；生产权限不变。浏览器包来自官方来源并核对 SHA256，验证结束后删除本次下载、解压目录与临时 profile。
+
+API 参考：[Edge 侧栏](https://learn.microsoft.com/en-us/microsoft-edge/extensions/developer-guide/sidebar)、[Brave 扩展支持](https://brave.com/learn/using-chrome-extensions-in-brave/)。这些说明用于选定测试目标，实际兼容结论以回归结果为准。
 
 合成测试不证明所有真实账号、地区、语言或灰度布局都兼容。没有实测磁盘耗尽、断电、取证级擦除或所有浏览器重启后的身份变化；存储故障使用合成异常。复制内容一致性也不代表真实模型接续质量已验证。不要把这些未完成项描述为测试通过。
 
