@@ -182,6 +182,226 @@ test("virtualization, refresh, SPA changes and independent tabs retain durable r
   await panel.reload();
   await expect(panel.locator(".session")).toHaveCount(2);
 });
+test("ChatGPT keeps one durable record when conversation markers disappear and the first turn is unloaded", async () => {
+  await enable();
+  const p = await chat();
+  const status = p.locator("#keeptemp-status").getByRole("status");
+  await expect(status).toContainText("Saved");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await p.evaluate(
+    (html) => {
+      document
+        .querySelector("[data-thread-find-target]")!
+        .insertAdjacentHTML("beforeend", html);
+    },
+    turn("later-turn", "later synthetic question", "later synthetic answer"),
+  );
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await p.evaluate(() => {
+    const conversation = document.querySelector<HTMLElement>(
+      "[data-chatgpt-conversation-selection-target]",
+    )!;
+    delete conversation.dataset.chatgptConversationSelectionTarget;
+    conversation.querySelector("[data-turn-key]")!.remove();
+    conversation.querySelector("[data-markdown-text-style] p")!.textContent =
+      "continued after first turn was unloaded";
+  });
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "continued after first turn was unloaded",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await p.evaluate(() => {
+    const conversation = document.querySelector<HTMLElement>(
+      "[data-thread-find-target]",
+    )!;
+    conversation.dataset.chatgptConversationSelectionTarget =
+      "synthetic-conversation";
+    conversation
+      .querySelector('[data-chatgpt-search-unit-key$=":user"]')!
+      .remove();
+    conversation.querySelector("[data-markdown-text-style] p")!.textContent =
+      "assistant-only streaming update";
+  });
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "assistant-only streaming update",
+  );
+  await p.close();
+  await panel.reload();
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(4);
+  await expect(panel.locator(".messages")).toContainText("把临时对话留在手中");
+  await expect(panel.locator(".messages")).toContainText(
+    "assistant-only streaming update",
+  );
+});
+test("ChatGPT keeps a fallback record when its first turn moves and a stronger marker arrives later", async () => {
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: shell(turn("fallback-first")).replace(
+        'data-chatgpt-conversation-selection-target="synthetic-conversation"',
+        "",
+      ),
+    }),
+  );
+  await enable();
+  const p = await chat();
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await p.evaluate(
+    (html) => {
+      document
+        .querySelector("[data-thread-find-target]")!
+        .insertAdjacentHTML("beforeend", html);
+    },
+    turn(
+      "fallback-second",
+      "second synthetic question",
+      "second synthetic answer",
+    ),
+  );
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await p.evaluate(() => {
+    document.querySelector("[data-turn-key]")!.remove();
+    document.querySelector("[data-markdown-text-style] p")!.textContent =
+      "updated fallback answer";
+  });
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "updated fallback answer",
+  );
+  await p.evaluate(() => {
+    document.querySelector<HTMLElement>(
+      "[data-thread-find-target]",
+    )!.dataset.chatgptConversationSelectionTarget = "late-conversation";
+    document.querySelector("[data-markdown-text-style] p")!.textContent =
+      "updated after conversation marker arrived";
+  });
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "updated after conversation marker arrived",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: shell(
+        turn("fallback-second", "second synthetic question", "after reload"),
+        "late-conversation",
+      ),
+    }),
+  );
+  await p.reload();
+  await expect(panel.locator(".session .preview")).toHaveText("after reload");
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await p.evaluate(
+    (html) => {
+      const conversation = document.querySelector<HTMLElement>(
+        "[data-thread-find-target]",
+      )!;
+      conversation.dataset.chatgptConversationSelectionTarget = "another-chat";
+      conversation.innerHTML = html;
+    },
+    turn(
+      "new-chat",
+      "separate synthetic question",
+      "separate synthetic answer",
+    ),
+  );
+  await expect(panel.locator(".session")).toHaveCount(2);
+});
+test("ChatGPT reattaches a legacy record after reload without duplicating it or bypassing pause and deletion", async () => {
+  const withoutConversation = (content: string) =>
+    shell(content).replace(
+      'data-chatgpt-conversation-selection-target="synthetic-conversation"',
+      "",
+    );
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: withoutConversation(turn("legacy-first") + turn("legacy-second")),
+    }),
+  );
+  await enable();
+  const p = await chat();
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  // Emulate a record created before durable native-key aliases existed.
+  await panel.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("keeptemp-v1");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("sessions", "readwrite");
+          const cursor = tx.objectStore("sessions").openCursor();
+          cursor.onsuccess = () => {
+            const row = cursor.result;
+            if (!row) return;
+            if (row.value.aliasOf) row.delete();
+            row.continue();
+          };
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+      }),
+  );
+  await browser.route("https://chatgpt.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: withoutConversation(
+        turn("legacy-second", "later question", "legacy record continued"),
+      ),
+    }),
+  );
+  await p.reload();
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "legacy record continued",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await expect(panel.locator(".session")).toContainText("4 条消息");
+  await menu(p);
+  await p
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "暂停", exact: true })
+    .click();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "已暂停",
+  );
+  await p.evaluate(() => {
+    document.querySelector("[data-markdown-text-style] p")!.textContent =
+      "resumed legacy reply";
+  });
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "legacy record continued",
+  );
+  await p
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "恢复（含可见内容）" })
+    .click();
+  await expect(panel.locator(".session .preview")).toHaveText(
+    "resumed legacy reply",
+  );
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await panel.locator(".session").click();
+  panel.once("dialog", (d) => d.accept());
+  await panel.getByRole("button", { name: "删除会话", exact: true }).click();
+  await expect(panel.locator(".session")).toHaveCount(0);
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "排除",
+  );
+});
 test("compact controls pause and resume; ordinary mode never writes", async () => {
   await enable();
   const p = await chat(),

@@ -3,6 +3,7 @@ import { browser } from "wxt/browser";
 import { translate, localizeInterface, type Locale } from "../src/i18n";
 import { GenericChatAdapter } from "../src/adapters/generic";
 import type { CaptureCandidate, BridgeResponse, Snapshot } from "../src/model";
+import { snapshotFingerprint } from "../src/model";
 
 export default defineContentScript({
   // Concrete matches are registered only after the user grants that origin.
@@ -191,9 +192,7 @@ export default defineContentScript({
           say("已切换会话 · 点击 KeepTemp 记录新对话");
           return;
         }
-        const key = JSON.stringify(
-          snapshot.messages.map((m) => [m.id, m.role, m.text]),
-        );
+        const key = snapshotFingerprint(snapshot);
         if (key === lastSaved) {
           say("Saved · 已存本机");
           return;
@@ -205,9 +204,7 @@ export default defineContentScript({
         const latest = await read();
         say(
           latest.snapshot?.id === activeId &&
-            JSON.stringify(
-              latest.snapshot.messages.map((m) => [m.id, m.role, m.text]),
-            ) === key
+            snapshotFingerprint(latest.snapshot) === key
             ? "Saved · 已存本机"
             : "内容已更新，等待保存",
         );
@@ -274,16 +271,8 @@ export default defineContentScript({
               const latest = await read();
               say(
                 latest.snapshot?.id === activeId &&
-                  JSON.stringify(
-                    latest.snapshot.messages.map((m) => [m.id, m.role, m.text]),
-                  ) ===
-                    JSON.stringify(
-                      inspection.snapshot.messages.map((m) => [
-                        m.id,
-                        m.role,
-                        m.text,
-                      ]),
-                    )
+                  snapshotFingerprint(latest.snapshot) ===
+                    snapshotFingerprint(inspection.snapshot)
                   ? "Saved · 已存本机"
                   : "内容已更新，等待保存",
               );

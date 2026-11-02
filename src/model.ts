@@ -20,6 +20,7 @@ export interface Session {
   excluded?: boolean;
   paused?: boolean;
   deleted?: boolean;
+  aliasOf?: string;
 }
 export interface Snapshot {
   source?: "mock" | "generic" | PlatformId;
@@ -28,6 +29,14 @@ export interface Snapshot {
   id: string;
   temporary: boolean | null;
   messages: Message[];
+  aliases?: string[];
+}
+export function snapshotFingerprint(snapshot: Snapshot) {
+  return JSON.stringify([
+    snapshot.id,
+    snapshot.aliases ?? [],
+    snapshot.messages.map((m) => [m.id, m.role, m.text]),
+  ]);
 }
 export interface PlatformAdapter {
   readonly source: "mock" | PlatformId;
@@ -89,7 +98,16 @@ export function validSnapshot(
     ) ||
     !Array.isArray(s.messages) ||
     !s.messages.length ||
-    s.messages.length > 10000
+    s.messages.length > 10000 ||
+    (s.aliases !== undefined &&
+      (!Array.isArray(s.aliases) ||
+        s.aliases.length > 10000 ||
+        !s.aliases.every(
+          (id) =>
+            typeof id === "string" &&
+            id.startsWith("thread:") &&
+            id.length <= 600,
+        )))
   )
     return false;
   let size = 0;

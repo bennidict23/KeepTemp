@@ -156,12 +156,18 @@ export default defineBackground(() => {
             const snapshot: Snapshot = {
               ...data.snapshot,
               id: scope(data.snapshot.id),
+              aliases: data.snapshot.aliases?.map(scope),
               source: platform,
               ...(generic
                 ? { sourceOrigin: origin, captureMode: "explicit" as const }
                 : {}),
             };
-            const saved = await repo.capture(snapshot, true, true);
+            const saved = await repo.capture(
+              snapshot,
+              true,
+              true,
+              scope("thread:"),
+            );
             if (!saved) {
               const s = await repo.get(snapshot.id);
               return {
@@ -177,7 +183,7 @@ export default defineBackground(() => {
               ok: true,
               consent: true,
               saved: true,
-              sessionId: snapshot.id,
+              sessionId: (await repo.get(snapshot.id))?.id,
               theme,
               language,
             };
@@ -199,14 +205,20 @@ export default defineBackground(() => {
             if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
             const snapshot = data.snapshot;
-            const saved = await repo.capture({
-              ...snapshot,
-              id: scope(snapshot.id),
-              source: platform,
-              ...(generic
-                ? { sourceOrigin: origin, captureMode: "explicit" as const }
-                : {}),
-            });
+            const saved = await repo.capture(
+              {
+                ...snapshot,
+                id: scope(snapshot.id),
+                aliases: snapshot.aliases?.map(scope),
+                source: platform,
+                ...(generic
+                  ? { sourceOrigin: origin, captureMode: "explicit" as const }
+                  : {}),
+              },
+              false,
+              false,
+              scope("thread:"),
+            );
             return { ok: true, consent: true, saved };
           }
           const id =

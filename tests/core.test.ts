@@ -65,6 +65,170 @@ describe("durable local capture", () => {
       createdAt: 1,
     });
   });
+  it("persists alternative session keys without duplicating the original record", async () => {
+    const name = crypto.randomUUID();
+    const r = new StorageRepository(name);
+    await r.authorize();
+    await r.setAutoCapture(true);
+    await r.capture({
+      ...snapshot("thread:first"),
+      aliases: ["thread:first", "thread:conversation:native", "thread:later"],
+    });
+    await r.rename("thread:first", "my original title");
+    const createdAt = (await r.get("thread:first"))!.createdAt;
+    await r.close();
+    const reopened = new StorageRepository(name);
+    await reopened.capture(snapshot("thread:later", "continued", 2));
+    expect(await reopened.list()).toHaveLength(1);
+    expect(await reopened.get("thread:conversation:native")).toMatchObject({
+      id: "thread:first",
+      title: "my original title",
+      createdAt,
+      messages: [{ text: "continued" }],
+    });
+  });
+  it("reattaches to an older record through an observed native key", async () => {
+    const r = await repo();
+    await r.capture(snapshot("thread:old-key"));
+    const incoming = snapshot("thread:new-key", "new turn", 2);
+    incoming.messages[0]!.id = "new-message";
+    incoming.aliases = ["thread:old-key", "thread:new-key"];
+    expect(await r.capture(incoming)).toBe(true);
+    expect(await r.list()).toHaveLength(1);
+    expect(
+      (await r.get("thread:new-key"))?.messages.map((m) => m.text),
+    ).toEqual(["synthetic", "new turn"]);
+  });
+  it("session aliases preserve pause, deletion and explicit re-recording", async () => {
+    const r = await repo();
+    const original = {
+      ...snapshot("thread:first", "deleted original"),
+      aliases: ["thread:later"],
+    };
+    await r.capture(original);
+    await r.pause("thread:later", true);
+    expect(await r.capture(snapshot("thread:later", "must not save", 2))).toBe(
+      false,
+    );
+    expect(await r.list()).toHaveLength(1);
+    await r.pause("thread:later", false);
+    await r.delete("thread:later");
+    expect(await r.list()).toHaveLength(0);
+    expect((await r.get("thread:first"))?.messages).toEqual([]);
+    expect(
+      await r.capture(snapshot("thread:later", "must not resurrect", 3)),
+    ).toBe(false);
+    expect(
+      await r.capture(snapshot("thread:later", "visible now", 4), true, true),
+    ).toBe(true);
+    expect((await r.list())[0]?.messages.map((m) => m.text)).toEqual([
+      "visible now",
+    ]);
+    await r.exclude("thread:later");
+    expect(await r.capture(snapshot("thread:first", "excluded", 5))).toBe(
+      false,
+    );
+  });
+  it("reattaches legacy records using native keys only within the trusted capture scope", async () => {
+    const r = await repo();
+    const first = snapshot("chatgpt:17:thread:first", "original");
+    first.messages[0]!.id = "user:second";
+    await r.capture(first);
+    const next = snapshot("chatgpt:17:thread:second", "continued", 2);
+    next.messages[0]!.id = "user:second";
+    next.aliases = [next.id];
+    expect(await r.capture(next, false, false, "chatgpt:17:thread:")).toBe(
+      true,
+    );
+    expect((await r.list()).map((s) => s.id)).toEqual([first.id]);
+    const otherTab = {
+      ...next,
+      id: "chatgpt:18:thread:second",
+      aliases: ["chatgpt:18:thread:second"],
+    };
+    expect(await r.capture(otherTab, false, false, "chatgpt:18:thread:")).toBe(
+      true,
+    );
+    expect(await r.list()).toHaveLength(2);
+  });
+  it("does not guess between overlapping legacy fragments or bypass their pause", async () => {
+    const r = await repo();
+    for (const id of ["first", "middle"]) {
+      const old = snapshot(`chatgpt:17:thread:${id}`);
+      old.messages[0]!.id = "user:shared-native";
+      await r.capture(old);
+    }
+    const current = {
+      ...snapshot("chatgpt:17:thread:latest", "new text", 2),
+      aliases: ["chatgpt:17:thread:shared-native"],
+    };
+    expect(await r.capture(current, false, false, "chatgpt:17:thread:")).toBe(
+      false,
+    );
+    expect(await r.list()).toHaveLength(2);
+    await r.delete("chatgpt:17:thread:middle");
+    await r.pause("chatgpt:17:thread:first", true);
+    expect(await r.capture(current, false, false, "chatgpt:17:thread:")).toBe(
+      false,
+    );
+    expect((await r.list())[0]?.messages[0]?.text).toBe("synthetic");
+  });
+  it("resolves explicit grants through aliases and clears them with all data", async () => {
+    const r = await repo();
+    const explicit: Snapshot = {
+      ...snapshot("thread:first"),
+      source: "generic",
+      sourceOrigin: "https://synthetic-chat.example",
+      captureMode: "explicit",
+      aliases: ["thread:later"],
+    };
+    expect(await r.capture(explicit, true)).toBe(true);
+    expect(await r.genericAllowed("thread:later")).toBe(true);
+    expect(await r.capture({ ...explicit, id: "thread:later" })).toBe(true);
+    await r.reset();
+    expect(await r.get("thread:later")).toBeUndefined();
+    expect(await r.genericAllowed("thread:later")).toBe(false);
+  });
+  it("refuses ambiguous alias matches and preserves both existing records", async () => {
+    const r = await repo();
+    await r.capture(snapshot("thread:one", "one"));
+    await r.capture(snapshot("thread:two", "two"));
+    expect(
+      await r.capture({
+        ...snapshot("thread:unknown"),
+        aliases: ["thread:one", "thread:two"],
+      }),
+    ).toBe(false);
+    expect(await r.list()).toHaveLength(2);
+    expect(await r.get("thread:unknown")).toBeUndefined();
+  });
+  it("rolls back message updates when writing an alias fails", async () => {
+    const r = await repo();
+    await r.capture(snapshot("thread:first", "original"));
+    const put = IDBObjectStore.prototype.put;
+    const fault = vi
+      .spyOn(IDBObjectStore.prototype, "put")
+      .mockImplementation(function (this: IDBObjectStore, value, key) {
+        if (this.name === "sessions" && value.aliasOf)
+          throw new DOMException(
+            "synthetic alias failure",
+            "QuotaExceededError",
+          );
+        return put.call(this, value, key);
+      });
+    try {
+      await expect(
+        r.capture({
+          ...snapshot("thread:first", "not committed", 2),
+          aliases: ["thread:later"],
+        }),
+      ).rejects.toThrow("storage-write-failed");
+    } finally {
+      fault.mockRestore();
+    }
+    expect((await r.get("thread:first"))?.messages[0]?.text).toBe("original");
+    expect(await r.get("thread:later")).toBeUndefined();
+  });
   it("persists after closing and reopening the database connection", async () => {
     const name = crypto.randomUUID();
     const a = new StorageRepository(name);

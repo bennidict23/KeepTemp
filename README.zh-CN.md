@@ -6,7 +6,7 @@
 
 ### 把 AI 临时对话保存为本机历史记录的浏览器扩展。
 
-[**📥 下载安装包**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [安装步骤](#安装)
+[**📥 下载安装包**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.1/keeptemp.zip) · [安装步骤](#安装)
 
 </div>
 
@@ -44,7 +44,7 @@
 
 Chrome 116+ · Edge · Brave
 
-1. [下载安装包](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip)并解压。
+1. [下载安装包](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.1/keeptemp.zip)并解压。
 2. 打开 `chrome://extensions`、`edge://extensions` 或 `brave://extensions`。
 3. 开启 **开发者模式** → **加载已解压的扩展** → 选择解压后包含 `manifest.json` 的文件夹。
 

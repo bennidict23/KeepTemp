@@ -6,7 +6,7 @@
 
 ### A browser extension to save temporary AI chats as local history.
 
-[**📥 Download**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [Install](#install)
+[**📥 Download**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.1/keeptemp.zip) · [Install](#install)
 
 </div>
 
@@ -44,7 +44,7 @@ No KeepTemp account or API key. No conversation uploads, cloud sync, or analytic
 
 Chrome 116+ · Edge · Brave
 
-1. [Download the ZIP](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) and extract it.
+1. [Download the ZIP](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.1/keeptemp.zip) and extract it.
 2. Open `chrome://extensions`, `edge://extensions`, or `brave://extensions`.
 3. Enable **Developer mode** → **Load unpacked** → select the extracted folder containing `manifest.json`.
 

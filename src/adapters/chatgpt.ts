@@ -143,14 +143,13 @@ function stableId(el: HTMLElement): string | null {
     nativeMessageId(el);
   return id && id.length <= 250 ? id : null;
 }
-function sessionKey(first: HTMLElement) {
-  const container = first.closest<HTMLElement>(
+function conversationKey(el: HTMLElement) {
+  const container = el.closest<HTMLElement>(
     '[data-chatgpt-conversation-selection-target][data-thread-find-target="conversation"]',
   );
   const conversation = container?.dataset.chatgptConversationSelectionTarget;
   if (conversation && /^[a-zA-Z0-9_-]{1,250}$/.test(conversation))
     return `conversation:${conversation}`;
-  return nativeMessageId(first) ?? turnKey(first);
 }
 export function messageText(el: HTMLElement): string {
   const content =
@@ -176,6 +175,13 @@ export function plainText(content: HTMLElement) {
 }
 export class ChatGPTAdapter implements PlatformAdapter {
   readonly source = "chatgpt" as const;
+  private path = "";
+  private session?: {
+    id: string;
+    conversation?: string;
+    route?: string;
+    known: Set<string>;
+  };
   constructor(
     private doc: Document,
     private location: () => URL,
@@ -183,6 +189,15 @@ export class ChatGPTAdapter implements PlatformAdapter {
   ) {}
   read(): Snapshot | null {
     const url = this.location();
+    // The initial prompt can acquire a /c/... route without starting a new chat.
+    // Other route changes are a boundary, even if the old DOM is still mounted.
+    if (
+      this.path &&
+      this.path !== url.pathname &&
+      !(this.path === "/" && /^\/c\/[a-zA-Z0-9_-]+\/?$/.test(url.pathname))
+    )
+      this.session = undefined;
+    this.path = url.pathname;
     if (
       url.origin !== "https://chatgpt.com" ||
       url.pathname.startsWith("/share/")
@@ -216,12 +231,56 @@ export class ChatGPTAdapter implements PlatformAdapter {
         updatedAt: now,
       });
     }
-    const firstNode = nodes.find((el) => roleOf(el) === "user");
-    const firstKey = firstNode ? sessionKey(firstNode) : undefined;
-    if (!firstKey || firstKey.length > 250 || !messages.length) return null;
-    // First user marker is retained when / becomes /c/... and across refreshes.
+    if (!messages.length) return null;
+    const conversations = new Set(nodes.map(conversationKey).filter(Boolean));
+    if (conversations.size > 1) return null;
+    const conversation = [...conversations][0];
+    const route = url.pathname.match(/^\/c\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
+    if (
+      conversation &&
+      this.session?.conversation &&
+      conversation !== this.session.conversation
+    )
+      this.session = undefined;
+    if (this.session) {
+      const sameConversation =
+        conversation && conversation === this.session.conversation;
+      const sameRoute = route && route === this.session.route;
+      const overlap = messages.some((m) => this.session!.known.has(m.id));
+      // A moving virtual window or a temporarily missing marker must not mint a
+      // second record. Without continuity evidence, wait instead of guessing.
+      if (!sameConversation && !sameRoute && !overlap) return null;
+      this.session.conversation ??= conversation;
+      messages.forEach((m) => this.session!.known.add(m.id));
+    } else {
+      const firstNode = nodes.find((el) => roleOf(el) === "user");
+      const firstKey =
+        conversation ??
+        (firstNode
+          ? (nativeMessageId(firstNode) ?? turnKey(firstNode))
+          : undefined);
+      if (!firstNode || !firstKey || firstKey.length > 250) return null;
+      this.session = {
+        id: `thread:${firstKey}`,
+        conversation,
+        route,
+        known: new Set(messages.map((m) => m.id)),
+      };
+    }
+    // Keep the original storage key when stronger markers arrive later.
+    // Persist alternative native keys too, so a fresh script can find this record.
+    // Positional test IDs are never session aliases.
+    const aliases = new Set<string>([this.session.id]);
+    if (this.session.conversation)
+      aliases.add(`thread:${this.session.conversation}`);
+    for (const node of nodes.filter((el) => roleOf(el) === "user")) {
+      for (const native of [nativeMessageId(node), turnKey(node)])
+        if (native && !/^\d+$/.test(native) && native.length <= 250)
+          aliases.add(`thread:${native}`);
+    }
     return {
-      id: `thread:${firstKey}`,
+      id: this.session.id,
+      aliases: [...aliases].sort(),
       source: "chatgpt",
       temporary,
       messages,

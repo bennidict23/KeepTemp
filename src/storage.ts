@@ -11,6 +11,32 @@ interface Schema extends DBSchema {
   sessions: { key: string; value: Session };
   meta: { key: string; value: boolean };
 }
+async function resolveSession(
+  get: (id: string) => Promise<Session | undefined>,
+  id: string,
+) {
+  const seen = new Set<string>();
+  for (let i = 0; i < 8; i++) {
+    if (seen.has(id)) throw new Error("invalid-session-alias");
+    seen.add(id);
+    const session = await get(id);
+    if (!session?.aliasOf) return session;
+    id = session.aliasOf;
+  }
+  throw new Error("invalid-session-alias");
+}
+function tombstone(id: string, aliasOf?: string): Session {
+  return {
+    id,
+    source: "mock",
+    title: "",
+    messages: [],
+    createdAt: 0,
+    updatedAt: 0,
+    deleted: true,
+    ...(aliasOf ? { aliasOf } : {}),
+  };
+}
 export class StorageRepository {
   private db;
   constructor(name = "keeptemp-v1") {
@@ -57,7 +83,10 @@ export class StorageRepository {
     return keys.filter((k) => k.startsWith("generic-grant:")).length;
   }
   async genericAllowed(id: string) {
-    return Boolean(await (await this.db).get("meta", `generic-grant:${id}`));
+    const canonical = (await this.get(id))?.id ?? id;
+    return Boolean(
+      await (await this.db).get("meta", `generic-grant:${canonical}`),
+    );
   }
   async setAutoCapture(enabled: boolean, source?: PlatformId) {
     const db = await this.db;
@@ -88,12 +117,14 @@ export class StorageRepository {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
   async get(id: string) {
-    return (await this.db).get("sessions", id);
+    const db = await this.db;
+    return resolveSession((key) => db.get("sessions", key), id);
   }
   async capture(
     snapshot: Snapshot,
     enableCapture = false,
     restartDeleted = false,
+    identityScope?: string,
   ) {
     const requestedExplicit = snapshot.captureMode === "explicit";
     if (
@@ -123,7 +154,39 @@ export class StorageRepository {
         return false;
       }
       const store = tx.objectStore("sessions");
-      let old = await store.get(snapshot.id);
+      let old = await resolveSession((id) => store.get(id), snapshot.id);
+      if (!old && snapshot.aliases?.length) {
+        const matches = new Map<string, Session>();
+        for (const alias of snapshot.aliases) {
+          const match = await resolveSession((id) => store.get(id), alias);
+          if (match) matches.set(match.id, match);
+        }
+        // Older builds did not persist aliases. Reattach only through native user
+        // keys in the sender's exact scope; never compare titles or message text.
+        if (!matches.size && identityScope) {
+          const keys = new Set(
+            snapshot.aliases
+              .filter((alias) => alias.startsWith(identityScope))
+              .map((alias) => `user:${alias.slice(identityScope.length)}`),
+          );
+          const candidates = await store.getAll(
+            IDBKeyRange.bound(identityScope, identityScope + "\uffff"),
+          );
+          for (const candidate of candidates)
+            if (
+              !candidate.deleted &&
+              candidate.messages.some((m) => keys.has(m.id))
+            )
+              matches.set(candidate.id, candidate);
+        }
+        // Never combine ambiguous existing records or guess from message text.
+        if (matches.size > 1) {
+          await tx.done;
+          return false;
+        }
+        old = [...matches.values()][0];
+      }
+      const id = old?.id ?? snapshot.id;
       // Only a new explicit record command may replace a deletion marker.
       // Drop the tombstone entirely: never restore deleted title/messages/times.
       if (old?.deleted && enableCapture && restartDeleted) old = undefined;
@@ -134,7 +197,7 @@ export class StorageRepository {
       const explicit = requestedExplicit || old?.captureMode === "explicit";
       if (!enableCapture) {
         const key = explicit
-          ? `generic-grant:${snapshot.id}`
+          ? `generic-grant:${id}`
           : isPlatform(snapshot.source)
             ? captureKey(snapshot.source)
             : null;
@@ -144,7 +207,7 @@ export class StorageRepository {
         }
       }
       if (enableCapture && explicit)
-        await tx.objectStore("meta").put(true, `generic-grant:${snapshot.id}`);
+        await tx.objectStore("meta").put(true, `generic-grant:${id}`);
       else if (enableCapture && isPlatform(snapshot.source))
         await tx.objectStore("meta").put(true, captureKey(snapshot.source));
       const messages = new Map(old?.messages.map((m) => [m.id, m]));
@@ -176,7 +239,7 @@ export class StorageRepository {
       const all = ordered.map((id, order) => ({ ...messages.get(id)!, order }));
       const now = Date.now();
       await store.put({
-        id: snapshot.id,
+        id,
         source: snapshot.source ?? "mock",
         ...(explicit
           ? {
@@ -198,6 +261,10 @@ export class StorageRepository {
         updatedAt: now,
         messages: all,
       });
+      for (const alias of new Set([snapshot.id, ...(snapshot.aliases ?? [])])) {
+        if (alias !== id && !(await store.get(alias)))
+          await store.put(tombstone(alias, id));
+      }
       await tx.done;
       return true;
     } catch {
@@ -219,6 +286,7 @@ export class StorageRepository {
     await tx.done;
   }
   async exclude(id: string) {
+    id = (await this.get(id))?.id ?? id;
     const db = await this.db;
     const tx = db.transaction("sessions", "readwrite");
     const s = await tx.store.get(id);
@@ -226,6 +294,7 @@ export class StorageRepository {
     await tx.done;
   }
   async pause(id: string, paused: boolean) {
+    id = (await this.get(id))?.id ?? id;
     const db = await this.db;
     const tx = db.transaction("sessions", "readwrite");
     const s = await tx.store.get(id);
@@ -233,6 +302,7 @@ export class StorageRepository {
     await tx.done;
   }
   async rename(id: string, title: string) {
+    id = (await this.get(id))?.id ?? id;
     const name = title.trim().replace(/\s+/g, " ");
     if (!name || name.length > 100) throw new Error("invalid-title");
     const db = await this.db;
@@ -246,18 +316,11 @@ export class StorageRepository {
     await tx.done;
   }
   async delete(id: string) {
+    id = (await this.get(id))?.id ?? id;
     const db = await this.db;
     const tx = db.transaction(["sessions", "meta"], "readwrite");
     await tx.objectStore("meta").delete(`generic-grant:${id}`);
-    await tx.objectStore("sessions").put({
-      id,
-      source: "mock",
-      title: "",
-      messages: [],
-      createdAt: 0,
-      updatedAt: 0,
-      deleted: true,
-    });
+    await tx.objectStore("sessions").put(tombstone(id));
     await tx.done;
   }
   async reset() {

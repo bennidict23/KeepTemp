@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
+import { snapshotFingerprint } from "../src/model";
 import { mountPageHistory } from "../src/page-history";
 import { historyPlatformFromUrl } from "../src/platforms";
 import { version } from "../package.json";
@@ -246,10 +247,7 @@ export default defineContentScript({
           return { ok: false, error: "paused" };
         }
         if (!dirty && !force) return { ok: true, saved: Boolean(lastSaved) };
-        const key = JSON.stringify([
-          s.id,
-          s.messages.map((m) => [m.id, m.role, m.text]),
-        ]);
+        const key = snapshotFingerprint(s);
         dirty = false;
         if (key === lastSaved) {
           say("Saved · 已存本机");
@@ -261,12 +259,7 @@ export default defineContentScript({
         if (r.saved) {
           lastSaved = key;
           const latest = adapter.read();
-          const currentKey = latest
-            ? JSON.stringify([
-                latest.id,
-                latest.messages.map((m) => [m.id, m.role, m.text]),
-              ])
-            : "";
+          const currentKey = latest ? snapshotFingerprint(latest) : "";
           if (currentKey === key) say("Saved · 已存本机");
           else {
             dirty = true;
@@ -338,17 +331,9 @@ export default defineContentScript({
                 consent = true;
                 lastState = 0;
                 dirty = true;
-                lastSaved = JSON.stringify([
-                  snapshot.id,
-                  snapshot.messages.map((m) => [m.id, m.role, m.text]),
-                ]);
+                lastSaved = snapshotFingerprint(snapshot);
                 const latest = adapter.read();
-                const key = latest
-                  ? JSON.stringify([
-                      latest.id,
-                      latest.messages.map((m) => [m.id, m.role, m.text]),
-                    ])
-                  : "";
+                const key = latest ? snapshotFingerprint(latest) : "";
                 say(
                   key === lastSaved
                     ? "Saved · 已存本机"
