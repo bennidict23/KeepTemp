@@ -19,11 +19,10 @@ export default defineBackground(() => {
       phase: "new" | "filled" | "sent";
     }
   >();
-  const opening = new Set<string>();
-  async function continueChat(id: string) {
-    if (opening.has(id)) return { ok: false, error: "handoff-busy" };
-    opening.add(id);
-    let tabId: number | undefined;
+  const opening = new Set<number>();
+  async function continueChat(id: string, tabId: number) {
+    if (opening.has(tabId)) return { ok: false, error: "handoff-busy" };
+    opening.add(tabId);
     try {
       const record = await repo.get(id);
       if (
@@ -34,40 +33,107 @@ export default defineBackground(() => {
       )
         return { ok: false, error: "handoff-cancelled" };
       const text = context(record);
-      const tab = await browser.tabs.create({
-        url: "about:blank",
-        active: true,
-      });
-      tabId = tab.id;
-      if (tabId === undefined) throw Error();
+      const ask = (type: string) =>
+        browser.tabs.sendMessage(tabId, { type }, { frameId: 0 });
+      try {
+        if (!(await ask("keeptemp:ping"))?.ok) throw Error();
+      } catch {
+        await browser.scripting.executeScript({
+          target: { tabId, frameIds: [0] },
+          files: ["/content-scripts/capture.js"],
+        });
+      }
+      const page = await ask("keeptemp:continuation-page");
+      const snapshot = page?.snapshot as Snapshot | null;
+      if (
+        page?.occupied &&
+        snapshot?.id?.startsWith("thread:") &&
+        record.source === "chatgpt" &&
+        record.id.endsWith(":" + snapshot.id)
+      )
+        return await ask("keeptemp:resume-current");
+      if (page?.draft) return { ok: false, error: "handoff-draft-exists" };
+      if (page?.streaming) return { ok: false, error: "handoff-streaming" };
+      if (page?.occupied) {
+        // Never navigate away from unreadable or uncommitted current content.
+        if (
+          !snapshot ||
+          !validSnapshot(
+            { ...snapshot, source: "generic", captureMode: "explicit" },
+            true,
+          )
+        )
+          return { ok: false, error: "handoff-current-unsaved" };
+        const currentId = scopedChatId(tabId, snapshot.id, "chatgpt");
+        const matches = (saved: Awaited<ReturnType<typeof repo.get>>) =>
+          !saved?.deleted &&
+          snapshot.messages.every((m) =>
+            saved?.messages.some(
+              (n) => n.id === m.id && n.role === m.role && n.text === m.text,
+            ),
+          );
+        if (!matches(await repo.get(currentId))) {
+          const explicit = await repo.genericAllowed(currentId);
+          try {
+            await repo.capture({
+              ...snapshot,
+              id: currentId,
+              source: "chatgpt",
+              ...(explicit
+                ? {
+                    captureMode: "explicit",
+                    sourceOrigin: "https://chatgpt.com",
+                  }
+                : {}),
+            });
+          } catch {
+            return { ok: false, error: "handoff-current-unsaved" };
+          }
+          if (!matches(await repo.get(currentId)))
+            return { ok: false, error: "handoff-current-unsaved" };
+        }
+        const latest = await ask("keeptemp:continuation-page");
+        const identity = (s: Snapshot | null) =>
+          s &&
+          JSON.stringify([s.id, s.messages.map((m) => [m.id, m.role, m.text])]);
+        if (
+          latest.draft ||
+          latest.streaming ||
+          identity(latest.snapshot) !== identity(snapshot)
+        )
+          return { ok: false, error: "handoff-page-changed" };
+      }
+      const tab = await browser.tabs.get(tabId);
+      if (!tab.url || new URL(tab.url).origin !== "https://chatgpt.com")
+        return { ok: false, error: "handoff-page-changed" };
       const token = crypto.randomUUID();
       continuations.set(tabId, { token, id, text, phase: "new" });
-      await browser.tabs.update(tabId, {
-        url: "https://chatgpt.com/?temporary-chat=true",
-      });
-      const deadline = Date.now() + 15000;
-      while (true) {
-        const current = await browser.tabs.get(tabId);
-        if (
-          current.status === "complete" &&
-          current.url !== "about:blank" &&
-          !current.pendingUrl
-        )
-          break;
-        if (Date.now() > deadline) throw Error();
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
-      const current = await browser.tabs.get(tabId);
       if (
-        !current.url ||
-        new URL(current.url).origin !== "https://chatgpt.com" ||
-        new URL(current.url).pathname !== "/"
-      )
-        return { ok: false, error: "handoff-page-changed" };
-      await browser.scripting.executeScript({
-        target: { tabId, frameIds: [0] },
-        files: ["/content-scripts/capture.js"],
-      });
+        page.occupied ||
+        new URL(tab.url).pathname !== "/" ||
+        page.mode !== true
+      ) {
+        await browser.tabs.update(tabId, {
+          url: "https://chatgpt.com/?temporary-chat=true",
+        });
+        const deadline = Date.now() + 3000;
+        while (true) {
+          const current = await browser.tabs.get(tabId);
+          if (
+            current.status === "complete" &&
+            !current.pendingUrl &&
+            current.url?.startsWith("https://chatgpt.com/?temporary-chat=true")
+          )
+            break;
+          if (Date.now() > deadline)
+            return { ok: false, error: "handoff-loading" };
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await browser.scripting.executeScript({
+          target: { tabId, frameIds: [0] },
+          files: ["/content-scripts/capture.js"],
+        });
+      }
       return (
         (await browser.tabs.sendMessage(
           tabId,
@@ -79,13 +145,13 @@ export default defineBackground(() => {
       return {
         ok: false,
         error:
-          continuations.get(tabId ?? -1)?.phase === "sent"
+          continuations.get(tabId)?.phase === "sent"
             ? "handoff-send-unconfirmed"
             : "handoff-unavailable",
       };
     } finally {
-      if (tabId !== undefined) continuations.delete(tabId);
-      opening.delete(id);
+      continuations.delete(tabId);
+      opening.delete(tabId);
     }
   }
   // Native side-panel auto-opening does not grant activeTab. Handle the real
@@ -162,7 +228,19 @@ export default defineBackground(() => {
           sendResponse({ ok: false, error: "invalid-source" });
           return false;
         }
-        void continueChat(data.id).then(sendResponse, () =>
+        void (async () => {
+          const tab = sender.tab?.url?.startsWith("https://chatgpt.com/")
+            ? sender.tab
+            : (
+                await browser.tabs.query({ active: true, currentWindow: true })
+              )[0];
+          if (
+            tab?.id === undefined ||
+            !tab.url?.startsWith("https://chatgpt.com/")
+          )
+            return { ok: false, error: "handoff-use-chatgpt" };
+          return continueChat(data.id as string, tab.id);
+        })().then(sendResponse, () =>
           sendResponse({ ok: false, error: "handoff-unavailable" }),
         );
         return true;

@@ -2,15 +2,46 @@ import { messageText, temporaryMode, visible } from "./adapters/chatgpt";
 
 export type ContinuationResult = { ok: true } | { ok: false; error: string };
 
-// Runs only in the new ChatGPT tab created for an explicit continuation action.
-// A URL query is an instruction to the website, not proof of private mode.
+// Uses the same mode evidence as capture. An explicit off control overrides URL hints.
+export function continuationPageState(doc: Document, url: URL) {
+  const nodes = [
+    ...doc.querySelectorAll<HTMLElement>(
+      '#prompt-textarea[contenteditable="true"],textarea#prompt-textarea',
+    ),
+  ].filter(visible);
+  const node = nodes.length === 1 ? nodes[0] : undefined;
+  return {
+    mode: temporaryMode(doc, url),
+    draft: Boolean(
+      node &&
+      (node instanceof HTMLTextAreaElement
+        ? node.value
+        : (node.innerText ?? node.textContent)
+      )?.trim(),
+    ),
+    occupied: [
+      ...doc.querySelectorAll<HTMLElement>(
+        'main [data-message-author-role],main [data-content-search-unit-key$=":user"],main [data-content-search-unit-key$=":assistant"],main [data-chatgpt-search-unit-key$=":user"],main [data-chatgpt-search-unit-key$=":assistant"]',
+      ),
+    ].some(
+      (el) =>
+        visible(el) &&
+        !el.closest('form,[contenteditable="true"],[role="presentation"]'),
+    ),
+    streaming: [
+      ...doc.querySelectorAll<HTMLElement>(
+        '[data-testid="stop-button"],[data-testid="stop-generating-button"],button[aria-label="Stop generating"],button[aria-label="停止生成"]',
+      ),
+    ].some(visible),
+  };
+}
 export async function submitContinuation(
   doc: Document,
   getUrl: () => URL,
   text: string,
   claim: (step: "fill" | "send") => Promise<boolean>,
   signal: AbortSignal,
-  timeout = 15000,
+  timeout = 1500,
 ): Promise<ContinuationResult> {
   const delay = () => new Promise((resolve) => setTimeout(resolve, 100));
   const deadline = Date.now() + timeout;
@@ -26,8 +57,6 @@ export async function submitContinuation(
   };
   const privateMode = () => {
     const url = getUrl();
-    if (url.searchParams.get("temporary-chat") === "false") return false;
-    url.search = "";
     return temporaryMode(doc, url) === true;
   };
   const users = () =>
@@ -109,6 +138,8 @@ export async function submitContinuation(
       if (!fresh() || occupied())
         return { ok: false, error: "handoff-page-changed" };
       const node = editor();
+      if (node && !privateMode())
+        return { ok: false, error: "handoff-mode-unconfirmed" };
       if (node && normalized(value(node)))
         return { ok: false, error: "handoff-draft-exists" };
       if (

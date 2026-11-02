@@ -267,12 +267,12 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   <button
                     className="embedded-primary"
                     disabled={busy || !interactive}
-                    aria-label="新建临时聊天并接续"
-                    title="将完整记录发送到新的 ChatGPT 临时聊天"
+                    aria-label="在当前页面接续"
+                    title="返回当前聊天，或在当前标签页恢复背景"
                     onClick={() =>
                       run(
                         () => continueInChatGPT(current.id),
-                        "已在新的 ChatGPT 临时聊天发送接续背景。",
+                        "已在当前页面接续，请查看聊天页面。",
                         true,
                       )
                     }

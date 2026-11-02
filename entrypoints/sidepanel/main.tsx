@@ -337,14 +337,14 @@ function App() {
               <button
                 className="primary"
                 disabled={busy}
-                aria-label="新建临时聊天并接续"
+                aria-label="在当前页面接续"
                 onClick={() =>
                   run(
                     async () => {
                       await continueInChatGPT(current.id);
                     },
-                    "已在新的 ChatGPT 临时聊天发送接续背景。",
-                    "自动接续未完成，请检查新窗口；仍可使用复制并接续。",
+                    "已在当前页面接续，请查看聊天页面。",
+                    "自动接续未完成，请检查当前聊天页面；仍可使用复制并接续。",
                   )
                 }
               >
@@ -394,7 +394,7 @@ function App() {
           </div>
           <small>
             {destination === "chatgpt"
-              ? "「接着聊」会在新的 ChatGPT 临时聊天发送完整历史与接续提示词；复制操作仅写入剪贴板。"
+              ? "「接着聊」会在当前 ChatGPT 标签页接续；复制操作仅写入剪贴板。"
               : "已包含完整历史与接续提示词。请在目标平台先开启临时／隐身模式，再粘贴发送。"}
           </small>
           {longContext(current) && (

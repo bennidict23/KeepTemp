@@ -2,7 +2,8 @@ import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
 import { mountChatGPTHistory } from "../src/chatgpt-history";
-import { submitContinuation } from "../src/continuation";
+import { continuationPageState, submitContinuation } from "../src/continuation";
+import { ChatGPTAdapter } from "../src/adapters/chatgpt";
 import { currentChatError, CurrentChatError } from "../src/current-chat";
 export default defineContentScript({
   matches: [
@@ -284,6 +285,34 @@ export default defineContentScript({
         !sender.url?.startsWith(browser.runtime.getURL("/"))
       )
         return;
+      if (
+        request?.type === "keeptemp:continuation-page" &&
+        location.origin === "https://chatgpt.com"
+      ) {
+        reply({
+          ok: true,
+          ...continuationPageState(document, new URL(location.href)),
+          snapshot: new ChatGPTAdapter(
+            document,
+            () => new URL(location.href),
+            true,
+          ).read(),
+        });
+        return false;
+      }
+      if (
+        request?.type === "keeptemp:resume-current" &&
+        location.origin === "https://chatgpt.com"
+      ) {
+        history?.close();
+        document
+          .querySelector<HTMLElement>(
+            '#prompt-textarea[contenteditable="true"],textarea#prompt-textarea',
+          )
+          ?.focus();
+        reply({ ok: true, resumed: true });
+        return false;
+      }
       if (request?.type === "keeptemp:submit-continuation") {
         if (
           location.origin !== "https://chatgpt.com" ||
@@ -297,6 +326,7 @@ export default defineContentScript({
           return false;
         }
         submittedTokens.add(request.token);
+        history?.close();
         continuationNotice?.remove();
         const notice = document.createElement("div");
         notice.id = "keeptemp-continuation-status";
@@ -328,7 +358,7 @@ export default defineContentScript({
         ).then(
           (result) => {
             shadow.querySelector('[role="status"]')!.textContent = result.ok
-              ? "KeepTemp · 已在新临时聊天发送接续背景"
+              ? "KeepTemp · 已在当前页面发送接续背景"
               : currentChatError(new CurrentChatError(result.error));
             if (result.ok) ctx.setTimeout(() => notice.remove(), 8000);
             reply(result);

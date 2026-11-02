@@ -55,27 +55,30 @@ it.each(["textarea", "contenteditable"])(
     expect(document.querySelector("script")).toBeNull();
   },
 );
-it.each(["url-only", "off"])(
-  "never fills or sends on %s temporary evidence",
-  async (mode) => {
-    const { editor, click } = page(false),
-      permission = claim();
-    if (mode === "url-only") document.querySelector("header")!.remove();
-    expect(
-      await submitContinuation(
-        document,
-        url,
-        text,
-        permission,
-        controller.signal,
-        10,
-      ),
-    ).toMatchObject({ ok: false, error: "handoff-mode-unconfirmed" });
-    expect((editor as HTMLTextAreaElement).value).toBe("");
-    expect(click).not.toHaveBeenCalled();
-    expect(permission).not.toHaveBeenCalled();
-  },
-);
+it("accepts the same temporary URL evidence as capture without an extra header marker", async () => {
+  const { click } = page();
+  document.querySelector("header")!.remove();
+  expect(
+    await submitContinuation(document, url, text, claim(), controller.signal),
+  ).toEqual({ ok: true });
+  expect(click).toHaveBeenCalledTimes(1);
+});
+it("an explicit off control overrides a temporary URL and fails immediately", async () => {
+  const { editor, click } = page(false),
+    permission = claim();
+  expect(
+    await submitContinuation(
+      document,
+      url,
+      text,
+      permission,
+      controller.signal,
+    ),
+  ).toMatchObject({ error: "handoff-mode-unconfirmed" });
+  expect((editor as HTMLTextAreaElement).value).toBe("");
+  expect(click).not.toHaveBeenCalled();
+  expect(permission).not.toHaveBeenCalled();
+});
 it("does not overwrite an existing user draft", async () => {
   const { editor, click } = page();
   (editor as HTMLTextAreaElement).value = "合成用户正在输入";

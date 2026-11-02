@@ -199,5 +199,5 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
     host.remove();
     readingStyle.remove();
   });
-  return { open };
+  return { open, close: closeReader };
 }

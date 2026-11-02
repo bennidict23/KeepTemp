@@ -18,19 +18,25 @@ export function currentChatError(error: unknown) {
       "请先切换到 HTTPS 聊天网页，再从浏览器工具栏打开 KeepTemp；共享链接不保存。",
     "consent-required": "请先同意本地保存，再记录当前会话。",
     "handoff-mode-unconfirmed":
-      "未发送：无法确认新页面已进入临时模式。可使用复制并接续。",
-    "handoff-draft-exists": "未发送：新页面已有输入，已保留你的文字。",
+      "未发送：当前页面未识别为临时聊天，请先开启临时模式。",
+    "handoff-current-unsaved":
+      "未切换：当前对话尚未完整保存，请先记录当前对话。",
+    "handoff-streaming": "当前回复仍在生成，请等这一轮结束；没有切换或发送。",
+    "handoff-loading": "页面尚未就绪，未发送；请待页面显示后再点接着聊。",
+    "handoff-use-chatgpt": "请先切换到要接续的 ChatGPT 标签页。",
+    "handoff-draft-exists": "未发送：当前输入框已有草稿，已保留你的文字。",
     "handoff-needs-action":
-      "未发送：新窗口有待处理的提示，请先完成登录或临时模式选择。",
-    "handoff-page-changed": "未发送：新页面或输入内容已改变，请检查新窗口。",
+      "未发送：当前聊天页面有待处理的提示，请先完成登录或临时模式选择。",
+    "handoff-page-changed":
+      "未发送：当前页面或输入内容已改变，请检查当前聊天页面。",
     "handoff-cancelled": "未发送：本地授权或原记录已改变，请重新打开记录。",
     "handoff-editor-unavailable":
       "未发送：暂不支持这个输入框或发送按钮，请使用复制并接续。",
     "handoff-send-unconfirmed":
-      "已点击发送，但未能确认网页接收。请检查新窗口，避免重复发送。",
+      "已点击发送，但未能确认网页接收。请检查当前聊天页面，避免重复发送。",
     "handoff-unavailable":
-      "无法完成自动接续，请检查新窗口；仍可使用复制并接续。",
-    "handoff-busy": "这段记录正在接续，请查看已打开的新窗口。",
+      "无法完成自动接续，请检查当前聊天页面；仍可使用复制并接续。",
+    "handoff-busy": "这段记录正在接续，请查看当前聊天页面。",
     "site-access":
       "无法访问当前页面。请在扩展设置中允许访问当前平台的网站；无需刷新或关闭聊天。",
     regular: "当前页面不是临时聊天，未保存。",
