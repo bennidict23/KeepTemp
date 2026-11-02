@@ -2,22 +2,23 @@ import React, { useEffect, useRef, useState } from "react";
 import type { StorageRepository } from "../../src/storage";
 import type { Session } from "../../src/model";
 import { context, json, longContext, markdown } from "../../src/recovery";
-import {
-  continueInChatGPT,
-  currentChatError,
-  recordCurrentPage,
-} from "../../src/current-chat";
+import { currentChatError, recordCurrentPage } from "../../src/current-chat";
 import "./embedded.css";
+import { translate, type Locale } from "../../src/i18n";
+import { MenuItems, menuKeys } from "./menu";
 
 type Props = {
   repo: StorageRepository;
-  surface: "list" | "reader";
+  surface: "list" | "reader" | "menu";
   scope: string;
   theme: string;
 };
 type Confirmation = { kind: "delete"; session: Session } | { kind: "clear" };
 
 export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
+  const [locale, setLocale] = useState<Locale>("en");
+  const t = (value: string, params?: Record<string, string | number>) =>
+    translate(value, locale, params);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [consent, setConsent] = useState<boolean | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -35,6 +36,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const selection = useRef<string | null>(null);
+  const menuSelection = useRef<string | null>(null);
   const epoch = useRef(0);
   const mutating = useRef(false);
   const live = useRef(true);
@@ -42,21 +44,28 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
   const tellHost = (type: string) =>
     parent.postMessage({ type, scope }, "https://chatgpt.com");
   const close = () => tellHost("keeptemp:history-close");
+  const closeMenu = () => tellHost("keeptemp:menu-close");
 
   async function refresh() {
     const read = ++epoch.current;
-    const [allowed, automatic, records, appearance] = await Promise.all([
-      repo.consent(),
-      repo.autoCapture("chatgpt"),
-      repo.list(),
-      repo.darkMode(),
-    ]);
+    const [allowed, automatic, records, appearance, chinese] =
+      await Promise.all([
+        repo.consent(),
+        repo.autoCapture("chatgpt"),
+        repo.list(),
+        repo.darkMode(),
+        repo.chineseUI(),
+      ]);
     if (!live.current || read !== epoch.current) return;
     setConsent(allowed);
     setEnabled(automatic);
     setDark(appearance);
+    setLocale(chinese ? "zh" : "en");
     setSessions(records.filter((s) => s.source === "chatgpt"));
   }
+  useEffect(() => {
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+  }, [locale]);
   useEffect(() => {
     document.documentElement.dataset.theme =
       dark === undefined ? pageTheme : dark ? "dark" : "light";
@@ -76,6 +85,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     const updateTheme = (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== "https://chatgpt.com")
         return;
+      if (event.data?.type === "keeptemp:menu-dismiss") setMenu(null);
       if (
         event.data?.type === "keeptemp:theme" &&
         ["light", "dark"].includes(event.data.theme)
@@ -86,6 +96,39 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     const bus = new BroadcastChannel(`keeptemp-history:${scope}`);
     channel.current = bus;
     bus.onmessage = ({ data }) => {
+      if (
+        data?.type === "menu-ready" &&
+        surface === "list" &&
+        menuSelection.current
+      )
+        bus.postMessage({ type: "menu-select", id: menuSelection.current });
+      if (
+        data?.type === "menu-select" &&
+        surface === "menu" &&
+        typeof data.id === "string"
+      )
+        setSelected(data.id);
+      if (
+        data?.type === "menu-action" &&
+        surface === "list" &&
+        typeof data.id === "string" &&
+        data.id.length < 1200
+      ) {
+        void repo
+          .get(data.id)
+          .then((session) => {
+            if (!session || session.deleted || session.source !== "chatgpt")
+              return;
+            setMenu(null);
+            if (data.action === "rename") {
+              setTitle(session.title);
+              setEditing(session.id);
+            }
+            if (data.action === "delete")
+              setConfirmation({ kind: "delete", session });
+          })
+          .catch(() => {});
+      }
       if (data?.type === "ready" && surface === "list" && selection.current)
         bus.postMessage({ type: "select", id: selection.current });
       if (
@@ -100,28 +143,13 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
       if (data?.type === "changed") void refresh().catch(() => {});
     };
     if (surface === "reader") bus.postMessage({ type: "ready" });
-    const resize = new ResizeObserver(() => {
-      if (surface === "list")
-        parent.postMessage(
-          {
-            type: "keeptemp:history-size",
-            scope,
-            height:
-              document
-                .querySelector(".embedded-history")!
-                .getBoundingClientRect().height + 8,
-          },
-          "https://chatgpt.com",
-        );
-    });
-    const root = document.querySelector(".embedded-history");
-    if (root && surface === "list") resize.observe(root);
+    if (surface === "menu") bus.postMessage({ type: "menu-ready" });
     const poll = () => {
       if (!mutating.current)
         void refresh().catch(() => {
           if (live.current) {
             setFailed(true);
-            setNotice("暂时无法读取本机记录，请稍后重试。");
+            setNotice(t("Could not read local records. Please try again."));
           }
         });
     };
@@ -129,12 +157,15 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     const timer = setInterval(poll, 1000);
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (surface === "menu") closeMenu();
         setMenu(null);
         setEditing(null);
         setConfirmation(null);
       }
     };
-    window.addEventListener("keydown", escape);
+    // Remove a menu frame after the complete keystroke, so keyup has a live
+    // destination even when Escape closes the focused frame itself.
+    window.addEventListener("keyup", escape);
     return () => {
       live.current = false;
       cancelAnimationFrame(firstFrame);
@@ -143,14 +174,17 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
       epoch.current++;
       clearInterval(timer);
       bus.close();
-      resize.disconnect();
       window.removeEventListener("message", updateTheme);
-      window.removeEventListener("keydown", escape);
+      window.removeEventListener("keyup", escape);
     };
   }, [surface, scope, theme]);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [selected]);
+  useEffect(() => {
+    if (surface === "menu" && interactive && selected)
+      document.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+  }, [surface, interactive, selected]);
 
   async function run(
     task: () => Promise<unknown>,
@@ -170,7 +204,11 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
       setNotice(success);
     } catch (error) {
       setFailed(true);
-      setNotice(record ? currentChatError(error) : "操作未完成，请稍后重试。");
+      setNotice(
+        record
+          ? currentChatError(error)
+          : t("The action could not be completed. Please try again."),
+      );
     } finally {
       mutating.current = false;
       setBusy(false);
@@ -197,7 +235,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
   async function copy(session: Session) {
     // A page may deny the asynchronous Clipboard API to embedded frames.
     // This synchronous, user-initiated copy stays inside the extension frame.
-    const text = context(session);
+    const text = context(session, locale);
     const focused = document.activeElement;
     const field = document.createElement("textarea");
     field.value = text;
@@ -222,13 +260,56 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
   );
   const status = notice && (
     <p className="embedded-notice" role="status" data-error={failed}>
-      {notice}
+      {t(notice)}
     </p>
   );
+  // Do not expose clickable controls until the embedded frame has painted.
+  if (!interactive || (surface === "menu" && !selected))
+    return (
+      <div className={`embedded-history embedded-${surface}`}>
+        <p className="embedded-caption">{t("Loading…")}</p>
+      </div>
+    );
+  if (surface === "menu")
+    return (
+      <div
+        className="embedded-history menu-surface"
+        role="menu"
+        aria-label={t("Conversation actions")}
+        onKeyDown={menuKeys}
+      >
+        <MenuItems
+          locale={locale}
+          onRename={() => {
+            channel.current?.postMessage({
+              type: "menu-action",
+              action: "rename",
+              id: selected,
+            });
+            closeMenu();
+          }}
+          onDelete={() => {
+            channel.current?.postMessage({
+              type: "menu-action",
+              action: "delete",
+              id: selected,
+            });
+            closeMenu();
+          }}
+        />
+      </div>
+    );
   return (
     <div
       className={`embedded-history embedded-${surface}`}
-      inert={!interactive}
+      onPointerDown={(event) => {
+        if (
+          surface === "list" &&
+          menu &&
+          !(event.target as Element).closest(".embedded-row")
+        )
+          closeMenu();
+      }}
     >
       {surface === "reader" ? (
         <>
@@ -236,11 +317,18 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
             <button
               disabled={!interactive}
               onClick={close}
-              aria-label="返回 ChatGPT"
+              aria-label={t("Back to ChatGPT")}
             >
-              ← 返回 ChatGPT
+              {t("← Back to ChatGPT")}{" "}
             </button>
-            <span>本机记录 · KeepTemp</span>
+            <span>{t("Local copy · KeepTemp")}</span>
+            <button
+              aria-label={locale === "en" ? "中文" : "English"}
+              disabled={busy}
+              onClick={() => run(() => repo.setChineseUI(locale !== "zh"))}
+            >
+              {locale === "en" ? "中文" : "EN"}
+            </button>
             {current && (
               <button
                 disabled={busy || !interactive}
@@ -248,16 +336,20 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   setConfirmation({ kind: "delete", session: current })
                 }
               >
-                删除本机记录
+                {t("Delete local copy")}{" "}
               </button>
             )}
           </header>
           {status}
           {!consent ? (
-            <div className="embedded-empty">请先在左侧同意本地保存。</div>
+            <div className="embedded-empty">
+              {t("Agree to local saving in the sidebar first.")}
+            </div>
           ) : !current ? (
             <div className="embedded-empty">
-              {selected ? "这条本机记录已不存在。" : "正在打开本机记录…"}
+              {selected
+                ? t("This local record no longer exists.")
+                : t("Opening local record…")}
             </div>
           ) : (
             <>
@@ -267,39 +359,26 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   <button
                     className="embedded-primary"
                     disabled={busy || !interactive}
-                    aria-label="在当前页面接续"
-                    title="返回当前聊天，或在当前标签页恢复背景"
-                    onClick={() =>
-                      run(
-                        () => continueInChatGPT(current.id),
-                        "已在当前页面接续，请查看聊天页面。",
-                        true,
-                      )
-                    }
-                  >
-                    接着聊 ↗
-                  </button>
-                  <button
-                    disabled={busy || !interactive}
-                    aria-label="复制并接续"
                     onClick={() =>
                       run(
                         () => copy(current),
-                        "已复制完整记录与接续提示词。请在新聊天中粘贴发送。",
+                        t(
+                          "Full history and continuation prompt copied. Paste into a new chat and send.",
+                        ),
                       )
                     }
                   >
-                    复制
+                    {t("Copy & continue")}{" "}
                   </button>
                   <a
                     href="https://chatgpt.com/?temporary-chat=true"
                     target="_blank"
                     rel="noreferrer"
                   >
-                    新临时聊天 ↗
+                    {t("New temporary chat ↗")}{" "}
                   </a>
                   <details>
-                    <summary>导出</summary>
+                    <summary>{t("Export")}</summary>
                     <button onClick={() => download(current, "md")}>
                       Markdown
                     </button>
@@ -309,24 +388,27 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   </details>
                 </div>
                 <p className="embedded-caption">
-                  「接着聊」会把完整文字发送到新的 ChatGPT
-                  临时聊天，不恢复原服务端会话。
+                  {t(
+                    "This is a local text copy. Continue in a new chat; the original server session is not restored.",
+                  )}{" "}
                 </p>
-                {longContext(current) && (
+                {longContext(current, locale) && (
                   <p className="embedded-caption">
-                    这段记录较长，目标模型可能无法接收全部内容；复制不会自动截断。
+                    {t(
+                      "This record is long. The destination model may not accept all of it; the copy is never truncated.",
+                    )}{" "}
                   </p>
                 )}
                 <section
                   className="embedded-messages"
-                  aria-label="已保存的对话"
+                  aria-label={t("Saved conversation")}
                 >
                   {current.messages.map((m) => (
                     <article
                       className={`embedded-message embedded-${m.role}`}
                       key={m.id}
                     >
-                      <span>{m.role === "user" ? "你" : "ChatGPT"}</span>
+                      <span>{m.role === "user" ? t("You") : "ChatGPT"}</span>
                       <p>{m.text}</p>
                     </article>
                   ))}
@@ -337,14 +419,24 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
         </>
       ) : (
         <>
+          <div className="embedded-language">
+            <button
+              aria-label={locale === "en" ? "中文" : "English"}
+              disabled={busy}
+              onClick={() => run(() => repo.setChineseUI(locale !== "zh"))}
+            >
+              {locale === "en" ? "中文" : "EN"}
+            </button>
+          </div>
           {consent === null ? (
-            <p className="embedded-caption">正在打开本机历史…</p>
+            <p className="embedded-caption">{t("Opening local history…")}</p>
           ) : !consent ? (
             <div className="embedded-onboarding">
-              <p>给自己的对话留一份。</p>
+              <p>{t("Keep a copy for yourself.")}</p>
               <p className="embedded-caption">
-                文字保存在当前浏览器，不上传到 KeepTemp
-                服务器。不会隐藏网站历史；数据库未加密，卸载扩展可能丢失记录。
+                {t(
+                  "Text stays in this browser. It does not hide website history. The database is not encrypted; uninstalling may remove records.",
+                )}{" "}
               </p>
               <button
                 className="embedded-primary"
@@ -353,10 +445,10 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   run(async () => {
                     await repo.authorize();
                     await repo.setAutoCapture(true, "chatgpt");
-                  }, "已开启临时聊天记录")
+                  }, t("Temporary chat recording enabled"))
                 }
               >
-                同意并开启本地记录
+                {t("Agree and enable local recording")}{" "}
               </button>
             </div>
           ) : (
@@ -370,28 +462,32 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                         await recordCurrentPage(repo);
                         setQuery("");
                       },
-                      "已存入本机历史",
+                      t("Saved to local history"),
                       true,
                     )
                   }
                 >
-                  ＋ 记录当前对话
+                  {t("＋ Record current chat")}{" "}
                 </button>
                 <button
                   disabled={busy || !interactive}
-                  title="自动记录临时聊天"
-                  aria-label={enabled ? "暂停临时自动记录" : "开启临时自动记录"}
+                  title={t("Automatically record temporary chats")}
+                  aria-label={
+                    enabled
+                      ? t("Pause temporary auto-recording")
+                      : t("Enable temporary auto-recording")
+                  }
                   onClick={() =>
                     run(() => repo.setAutoCapture(!enabled, "chatgpt"))
                   }
                 >
-                  {enabled ? "暂停" : "开启"}
+                  {enabled ? t("Pause") : t("Enable")}
                 </button>
               </div>
               <input
                 type="search"
-                aria-label="搜索本机历史"
-                placeholder="搜索本机历史"
+                aria-label={t("Search local history")}
+                placeholder={t("Search local history")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -399,8 +495,8 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                 {!matched.length && (
                   <p className="embedded-caption">
                     {query
-                      ? "没有找到相关记录"
-                      : "保存的 ChatGPT 对话会出现在这里。"}
+                      ? t("No matching records")
+                      : t("Saved ChatGPT conversations appear here.")}
                   </p>
                 )}
                 {matched.map((s) => (
@@ -416,7 +512,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                         }}
                       >
                         <input
-                          aria-label="会话名称"
+                          aria-label={t("Conversation name")}
                           autoFocus
                           maxLength={100}
                           value={title}
@@ -425,7 +521,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                         <button
                           disabled={busy || !interactive || !title.trim()}
                         >
-                          保存
+                          {t("Save")}{" "}
                         </button>
                       </form>
                     ) : (
@@ -438,42 +534,45 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                           {s.title}
                         </button>
                         <button
-                          aria-label={`会话操作：${s.title}`}
+                          aria-label={t("Conversation actions: {title}", {
+                            title: s.title,
+                          })}
                           aria-expanded={menu === s.id}
-                          onClick={() => setMenu(menu === s.id ? null : s.id)}
+                          aria-haspopup="menu"
+                          onClick={(event) => {
+                            if (menu === s.id) {
+                              setMenu(null);
+                              closeMenu();
+                              return;
+                            }
+                            menuSelection.current = s.id;
+                            setMenu(s.id);
+                            channel.current?.postMessage({
+                              type: "menu-select",
+                              id: s.id,
+                            });
+                            const rect =
+                              event.currentTarget.getBoundingClientRect();
+                            parent.postMessage(
+                              {
+                                type: "keeptemp:menu-open",
+                                scope,
+                                x: rect.left,
+                                y: rect.bottom,
+                              },
+                              "https://chatgpt.com",
+                            );
+                          }}
                         >
                           ⋯
                         </button>
-                        {menu === s.id && (
-                          <div className="embedded-menu" role="menu">
-                            <button
-                              role="menuitem"
-                              onClick={() => {
-                                setTitle(s.title);
-                                setEditing(s.id);
-                                setMenu(null);
-                              }}
-                            >
-                              重命名
-                            </button>
-                            <button
-                              role="menuitem"
-                              onClick={() => {
-                                setMenu(null);
-                                setConfirmation({ kind: "delete", session: s });
-                              }}
-                            >
-                              删除本机记录
-                            </button>
-                          </div>
-                        )}
                       </>
                     )}
                   </div>
                 ))}
               </div>
               <details className="embedded-settings">
-                <summary>仅本机 · 设置</summary>
+                <summary>{t("Local only · Settings")}</summary>
                 <button
                   disabled={busy || !interactive}
                   onClick={() =>
@@ -484,19 +583,20 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                     )
                   }
                 >
-                  切换为
                   {(dark === undefined ? pageTheme === "dark" : dark)
-                    ? "浅色"
-                    : "深色"}
+                    ? t("Switch to light mode")
+                    : t("Switch to dark mode")}
                 </button>
                 <p>
-                  临时模式需在网站开启。普通聊天可以主动另存；本地保存不会删除网站历史。接续只保留文字，重要内容请导出备份。
+                  {t(
+                    "Temporary mode is controlled by the website. You can also save ordinary chats manually; a local copy does not delete website history. Continuation carries text only. Export important records for backup.",
+                  )}{" "}
                 </p>
                 <button
                   disabled={busy || !interactive}
                   onClick={() => setConfirmation({ kind: "clear" })}
                 >
-                  清空 KeepTemp 全部本机数据
+                  {t("Clear all KeepTemp local data")}{" "}
                 </button>
               </details>
             </>
@@ -510,20 +610,27 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
           role="alertdialog"
           aria-modal="true"
           aria-label={
-            confirmation.kind === "delete" ? "删除本机记录" : "清空全部本机数据"
+            confirmation.kind === "delete"
+              ? t("Delete local copy")
+              : t("Clear all local data")
           }
         >
           <p>
             {confirmation.kind === "delete"
-              ? `删除“${confirmation.session.title}”？只删除本机副本，无法撤销。`
-              : "清空所有平台的本机记录和本地保存授权？此操作无法撤销。"}
+              ? t(
+                  "Delete “{title}”? This only removes the local copy and cannot be undone.",
+                  { title: confirmation.session.title },
+                )
+              : t(
+                  "Clear local records and consent for every platform? This cannot be undone.",
+                )}
           </p>
           <div>
             <button
               disabled={busy || !interactive}
               onClick={() => setConfirmation(null)}
             >
-              取消
+              {t("Cancel")}{" "}
             </button>
             <button
               className="embedded-primary"
@@ -537,12 +644,16 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                     setConfirmation(null);
                   },
                   confirmation.kind === "delete"
-                    ? "已删除本机记录"
-                    : "已清空全部本机数据",
+                    ? t("Local copy deleted")
+                    : t("All local data cleared"),
                 )
               }
             >
-              确认{confirmation.kind === "delete" ? "删除" : "清空"}
+              {t(
+                confirmation.kind === "delete"
+                  ? "Confirm delete"
+                  : "Confirm clear",
+              )}
             </button>
           </div>
         </div>

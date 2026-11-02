@@ -545,32 +545,6 @@ summary {
   background: var(--soft);
   color: var(--ink);
 }
-.session-menu {
-  position: absolute;
-  right: 0;
-  top: 36px;
-  z-index: 6;
-  min-width: 138px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--paper);
-  box-shadow: 0 6px 24px #00000012;
-}
-.session-menu button {
-  display: block;
-  width: 100%;
-  border: 0;
-  border-radius: 6px;
-  text-align: left;
-  font-size: 12px;
-  padding: 10px 12px;
-  background: transparent;
-}
-.session-menu button:hover,
-.session-menu button:focus-visible {
-  background: var(--soft);
-}
 .rename-editor {
   padding: 16px;
   margin-bottom: 10px;
@@ -655,4 +629,61 @@ summary {
 }
 .toast[data-tone="error"] {
   border-width: 2px;
+}
+
+/* Local conversation actions use the same compact, monochrome menu in both UIs. */
+.session-menu,
+.menu-surface {
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.session-menu {
+  position: fixed;
+  z-index: 20;
+  width: 216px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 32px #0002;
+}
+.session-menu button,
+.menu-surface button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font:
+    14px/1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.session-menu button:hover,
+.session-menu button:focus-visible {
+  background: var(--soft);
+}
+.session-menu svg,
+.menu-surface svg {
+  flex: none;
+}
+.menu-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line);
+}
+.language-toggle {
+  padding: 6px 7px;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
 }

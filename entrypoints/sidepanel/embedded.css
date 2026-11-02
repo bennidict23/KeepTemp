@@ -63,6 +63,12 @@ html[data-embedded-surface] body {
 }
 .embedded-list {
   padding: 2px 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.embedded-list > :not(.embedded-rows) {
+  flex-shrink: 0;
 }
 .embedded-list-tools {
   display: flex;
@@ -87,7 +93,8 @@ html[data-embedded-surface] body {
   font-size: 12px;
 }
 .embedded-rows {
-  max-height: 216px;
+  flex: 1;
+  min-height: 36px;
   overflow: auto;
   scrollbar-width: thin;
 }
@@ -122,23 +129,6 @@ html[data-embedded-surface] body {
 .embedded-row form button {
   font-size: 12px;
   flex-shrink: 0;
-}
-.embedded-menu {
-  position: relative;
-  z-index: 2;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 3px;
-  flex-shrink: 0;
-  width: 100%;
-  display: flex;
-  margin: 2px 0 6px;
-}
-.embedded-menu button {
-  display: block;
-  white-space: nowrap;
-  font-size: 12px;
 }
 .embedded-caption,
 .embedded-settings {
@@ -285,4 +275,23 @@ html[data-embedded-surface] body {
   .embedded-message.embedded-user {
     margin-left: 5%;
   }
+}
+html[data-embedded-surface="menu"] body {
+  background: transparent;
+}
+.menu-surface {
+  min-height: 110px;
+}
+.menu-surface button:hover,
+.menu-surface button:focus-visible {
+  background: var(--soft);
+}
+.embedded-language {
+  display: flex;
+  justify-content: flex-end;
+}
+.embedded-language button {
+  font-size: 11px;
+  padding: 3px 7px;
+  color: var(--muted);
 }

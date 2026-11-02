@@ -4,6 +4,7 @@ import {
   context,
   transcript,
   CONTINUATION_PROMPT,
+  ENGLISH_CONTINUATION_PROMPT,
   json,
   markdown,
   longContext,
@@ -190,6 +191,16 @@ describe("recovery and exports", () => {
     expect(packed).toContain("不要重新开场");
     expect(packed).toContain("如果最后一个用户请求尚未完成");
   });
+  it("changes only continuation instructions when English is selected", () => {
+    const packed = context(s, "en");
+    expect(packed.startsWith(ENGLISH_CONTINUATION_PROMPT)).toBe(true);
+    expect(
+      packed
+        .split("<<<KEEPTEMP_HISTORY>>>\n")[1]!
+        .split("\n<<<END_KEEPTEMP_HISTORY>>>")[0],
+    ).toBe(transcript(s));
+    expect(packed).toContain("Keep the conversation's language and tone.");
+  });
   it("chooses collision-free history boundaries without altering literal message text", () => {
     const special = {
       ...s,
@@ -280,4 +291,24 @@ it("rolls back enabling capture when the first manual write fails", async () => 
   }
   expect(await r.autoCapture()).toBe(false);
   expect(await r.list()).toEqual([]);
+});
+
+it("defaults to English and retains language without changing saved content or consent", async () => {
+  const name = crypto.randomUUID();
+  const r = new StorageRepository(name);
+  expect(await r.chineseUI()).toBe(false);
+  await r.setChineseUI(true);
+  expect(await r.consent()).toBe(false);
+  await r.authorize();
+  await r.setAutoCapture(true);
+  await r.capture(snapshot());
+  const original = await r.list();
+  const reopened = new StorageRepository(name);
+  expect(await reopened.chineseUI()).toBe(true);
+  expect(await reopened.list()).toEqual(original);
+  await reopened.setChineseUI(false);
+  expect(await r.list()).toEqual(original);
+  await r.reset();
+  expect(await reopened.chineseUI()).toBe(false);
+  expect(await reopened.consent()).toBe(false);
 });

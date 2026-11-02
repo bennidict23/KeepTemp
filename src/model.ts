@@ -65,6 +65,7 @@ export interface BridgeResponse {
   saved?: boolean;
   sessionId?: string;
   theme?: "light" | "dark" | "system";
+  language?: "en" | "zh";
   paused?: boolean;
   excluded?: boolean;
   error?: string;

@@ -1,5 +1,6 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
+import { translate, localizeInterface, type Locale } from "../src/i18n";
 import { GenericChatAdapter } from "../src/adapters/generic";
 import type { CaptureCandidate, BridgeResponse, Snapshot } from "../src/model";
 
@@ -9,6 +10,7 @@ export default defineContentScript({
   registration: "runtime",
   runAt: "document_idle",
   main(ctx) {
+    let locale: Locale = "en";
     const adapter = new GenericChatAdapter(
       document,
       () => new URL(location.href),
@@ -75,12 +77,13 @@ export default defineContentScript({
               if (!result.ok) throw Error();
               const button =
                 host!.shadowRoot!.querySelector<HTMLButtonElement>("#pause")!;
-              button.textContent = result.paused
-                ? "恢复（含可见内容）"
-                : "暂停";
+              button.textContent = translate(
+                result.paused ? "恢复（含可见内容）" : "暂停",
+                locale,
+              );
               button.setAttribute(
                 "aria-label",
-                result.paused ? "恢复记录" : "暂停记录",
+                translate(result.paused ? "恢复记录" : "暂停记录", locale),
               );
               say(result.paused ? "已暂停" : "等待更新");
               lastSaved = "";
@@ -92,9 +95,11 @@ export default defineContentScript({
             }
           };
       }
+      localizeInterface(host.shadowRoot!, locale);
       if (theme === "system") delete host.dataset.theme;
       else host.dataset.theme = theme;
-      host.shadowRoot!.querySelector("p")!.textContent = `KeepTemp · ${text}`;
+      host.shadowRoot!.querySelector("p")!.textContent =
+        `KeepTemp · ${translate(text, locale)}`;
       host.dataset.recording = String(Boolean(activeId));
       host.dataset.state = text.includes("Saved")
         ? "saved"
@@ -124,6 +129,7 @@ export default defineContentScript({
         snapshot,
         id,
       })) as BridgeResponse;
+      if (result.language) locale = result.language;
       if (result.theme) {
         theme = result.theme;
         if (host) {
@@ -169,8 +175,8 @@ export default defineContentScript({
           say("已暂停");
           const button =
             host!.shadowRoot!.querySelector<HTMLButtonElement>("#pause")!;
-          button.textContent = "恢复（含可见内容）";
-          button.setAttribute("aria-label", "恢复记录");
+          button.textContent = translate("恢复（含可见内容）", locale);
+          button.setAttribute("aria-label", translate("恢复记录", locale));
           return;
         }
         const inspection = await read();

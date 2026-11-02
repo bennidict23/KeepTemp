@@ -1,7 +1,8 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
 import { StorageRepository } from "../src/storage";
-import { context } from "../src/recovery";
+import { version } from "../package.json";
+import { translate } from "../src/i18n";
 import {
   validSnapshot,
   scopedChatId,
@@ -10,150 +11,6 @@ import {
 } from "../src/model";
 export default defineBackground(() => {
   const repo = new StorageRepository();
-  const continuations = new Map<
-    number,
-    {
-      token: string;
-      id: string;
-      text: string;
-      phase: "new" | "filled" | "sent";
-    }
-  >();
-  const opening = new Set<number>();
-  async function continueChat(id: string, tabId: number) {
-    if (opening.has(tabId)) return { ok: false, error: "handoff-busy" };
-    opening.add(tabId);
-    try {
-      const record = await repo.get(id);
-      if (
-        !(await repo.consent()) ||
-        !record ||
-        record.deleted ||
-        !record.messages.length
-      )
-        return { ok: false, error: "handoff-cancelled" };
-      const text = context(record);
-      const ask = (type: string) =>
-        browser.tabs.sendMessage(tabId, { type }, { frameId: 0 });
-      try {
-        if (!(await ask("keeptemp:ping"))?.ok) throw Error();
-      } catch {
-        await browser.scripting.executeScript({
-          target: { tabId, frameIds: [0] },
-          files: ["/content-scripts/capture.js"],
-        });
-      }
-      const page = await ask("keeptemp:continuation-page");
-      const snapshot = page?.snapshot as Snapshot | null;
-      if (
-        page?.occupied &&
-        snapshot?.id?.startsWith("thread:") &&
-        record.source === "chatgpt" &&
-        record.id.endsWith(":" + snapshot.id)
-      )
-        return await ask("keeptemp:resume-current");
-      if (page?.draft) return { ok: false, error: "handoff-draft-exists" };
-      if (page?.streaming) return { ok: false, error: "handoff-streaming" };
-      if (page?.occupied) {
-        // Never navigate away from unreadable or uncommitted current content.
-        if (
-          !snapshot ||
-          !validSnapshot(
-            { ...snapshot, source: "generic", captureMode: "explicit" },
-            true,
-          )
-        )
-          return { ok: false, error: "handoff-current-unsaved" };
-        const currentId = scopedChatId(tabId, snapshot.id, "chatgpt");
-        const matches = (saved: Awaited<ReturnType<typeof repo.get>>) =>
-          !saved?.deleted &&
-          snapshot.messages.every((m) =>
-            saved?.messages.some(
-              (n) => n.id === m.id && n.role === m.role && n.text === m.text,
-            ),
-          );
-        if (!matches(await repo.get(currentId))) {
-          const explicit = await repo.genericAllowed(currentId);
-          try {
-            await repo.capture({
-              ...snapshot,
-              id: currentId,
-              source: "chatgpt",
-              ...(explicit
-                ? {
-                    captureMode: "explicit",
-                    sourceOrigin: "https://chatgpt.com",
-                  }
-                : {}),
-            });
-          } catch {
-            return { ok: false, error: "handoff-current-unsaved" };
-          }
-          if (!matches(await repo.get(currentId)))
-            return { ok: false, error: "handoff-current-unsaved" };
-        }
-        const latest = await ask("keeptemp:continuation-page");
-        const identity = (s: Snapshot | null) =>
-          s &&
-          JSON.stringify([s.id, s.messages.map((m) => [m.id, m.role, m.text])]);
-        if (
-          latest.draft ||
-          latest.streaming ||
-          identity(latest.snapshot) !== identity(snapshot)
-        )
-          return { ok: false, error: "handoff-page-changed" };
-      }
-      const tab = await browser.tabs.get(tabId);
-      if (!tab.url || new URL(tab.url).origin !== "https://chatgpt.com")
-        return { ok: false, error: "handoff-page-changed" };
-      const token = crypto.randomUUID();
-      continuations.set(tabId, { token, id, text, phase: "new" });
-      if (
-        page.occupied ||
-        new URL(tab.url).pathname !== "/" ||
-        page.mode !== true
-      ) {
-        await browser.tabs.update(tabId, {
-          url: "https://chatgpt.com/?temporary-chat=true",
-        });
-        const deadline = Date.now() + 3000;
-        while (true) {
-          const current = await browser.tabs.get(tabId);
-          if (
-            current.status === "complete" &&
-            !current.pendingUrl &&
-            current.url?.startsWith("https://chatgpt.com/?temporary-chat=true")
-          )
-            break;
-          if (Date.now() > deadline)
-            return { ok: false, error: "handoff-loading" };
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        await browser.scripting.executeScript({
-          target: { tabId, frameIds: [0] },
-          files: ["/content-scripts/capture.js"],
-        });
-      }
-      return (
-        (await browser.tabs.sendMessage(
-          tabId,
-          { type: "keeptemp:submit-continuation", token, text },
-          { frameId: 0 },
-        )) ?? { ok: false, error: "handoff-unavailable" }
-      );
-    } catch {
-      return {
-        ok: false,
-        error:
-          continuations.get(tabId)?.phase === "sent"
-            ? "handoff-send-unconfirmed"
-            : "handoff-unavailable",
-      };
-    } finally {
-      continuations.delete(tabId);
-      opening.delete(tabId);
-    }
-  }
   // Native side-panel auto-opening does not grant activeTab. Handle the real
   // action so Chrome grants it, then open synchronously within that user gesture.
   browser.action.onClicked.addListener((tab) => {
@@ -171,7 +28,7 @@ export default defineBackground(() => {
             { type: "keeptemp:open-library" },
             { frameId: 0 },
           );
-          opened = Boolean(result?.ok);
+          opened = Boolean(result?.ok && result.version === version);
           if (!opened) throw new Error("library-unavailable");
         } catch {
           try {
@@ -184,7 +41,7 @@ export default defineBackground(() => {
               { type: "keeptemp:open-library" },
               { frameId: 0 },
             );
-            opened = Boolean(result?.ok);
+            opened = Boolean(result?.ok && result.version === version);
           } catch {
             /* The side panel remains available from Chrome's panel selector. */
           }
@@ -196,7 +53,10 @@ export default defineBackground(() => {
           tabId,
           title: opened
             ? "Open KeepTemp"
-            : "未能打开本机历史。请检查网站访问权限；也可从浏览器侧栏选择 KeepTemp。",
+            : translate(
+                "Could not open local history. Check website access, or choose KeepTemp from the browser side panel.",
+                (await repo.chineseUI()) ? "zh" : "en",
+              ),
         });
       })().catch(() => {});
       return;
@@ -217,33 +77,15 @@ export default defineBackground(() => {
         !request.type.startsWith("keeptemp:")
       )
         return;
-      if (request.type === "keeptemp:continue") {
-        const data = request as { id?: unknown };
-        if (
-          sender.id !== browser.runtime.id ||
-          !sender.url?.startsWith(browser.runtime.getURL("/")) ||
-          typeof data.id !== "string" ||
-          data.id.length > 1200
-        ) {
-          sendResponse({ ok: false, error: "invalid-source" });
-          return false;
-        }
-        void (async () => {
-          const tab = sender.tab?.url?.startsWith("https://chatgpt.com/")
-            ? sender.tab
-            : (
-                await browser.tabs.query({ active: true, currentWindow: true })
-              )[0];
-          if (
-            tab?.id === undefined ||
-            !tab.url?.startsWith("https://chatgpt.com/")
-          )
-            return { ok: false, error: "handoff-use-chatgpt" };
-          return continueChat(data.id as string, tab.id);
-        })().then(sendResponse, () =>
-          sendResponse({ ok: false, error: "handoff-unavailable" }),
-        );
-        return true;
+      // Accept only the capture protocol. Removed features must not receive an
+      // accidental success response from a page still running an older script.
+      if (
+        !/^keeptemp:(?:generic:)?(?:state|capture|start-current|exclude|pause)$/.test(
+          request.type,
+        )
+      ) {
+        sendResponse({ ok: false, error: "unsupported-request" });
+        return false;
       }
       // Top-frame scripts only; unknown HTTPS origins also require an explicit host grant below.
       if (
@@ -258,35 +100,6 @@ export default defineBackground(() => {
       }
       const tabId = sender.tab.id;
       const origin = new URL(sender.url).origin;
-      if (request.type === "keeptemp:handoff-check") {
-        const data = request as { token?: unknown; step?: unknown };
-        const job = continuations.get(tabId);
-        if (
-          origin !== "https://chatgpt.com" ||
-          !job ||
-          job.token !== data.token ||
-          (data.step !== "fill" && data.step !== "send")
-        ) {
-          sendResponse({ ok: false });
-          return false;
-        }
-        void (async () => {
-          const session = await repo.get(job.id);
-          const phase = data.step === "fill" ? "new" : "filled";
-          if (
-            !session ||
-            session.deleted ||
-            !(await repo.consent()) ||
-            context(session) !== job.text ||
-            continuations.get(tabId) !== job ||
-            job.phase !== phase
-          )
-            return { ok: false };
-          job.phase = data.step === "fill" ? "filled" : "sent";
-          return { ok: true };
-        })().then(sendResponse, () => sendResponse({ ok: false }));
-        return true;
-      }
       const explicit = request.type.startsWith("keeptemp:generic:");
       const type = explicit
         ? request.type.replace("keeptemp:generic:", "keeptemp:")
@@ -295,6 +108,8 @@ export default defineBackground(() => {
       const generic = platform === "generic" || explicit;
       const scope = (id: string) => scopedChatId(tabId, id, platform, origin);
       const data = request as Record<string, unknown>;
+      let language: "en" | "zh" = "en";
+      let theme: "system" | "light" | "dark" = "system";
       // Keep the channel alive on Chrome versions without Promise-returning listeners.
       void (async (): Promise<BridgeResponse> => {
         try {
@@ -311,7 +126,8 @@ export default defineBackground(() => {
               : null;
           const localConsent = await repo.consent();
           const dark = await repo.darkMode();
-          const theme =
+          language = (await repo.chineseUI()) ? "zh" : "en";
+          theme =
             dark === undefined
               ? ("system" as const)
               : dark
@@ -362,6 +178,7 @@ export default defineBackground(() => {
               saved: true,
               sessionId: snapshot.id,
               theme,
+              language,
             };
           }
           if (generic && type === "keeptemp:state") {
@@ -370,12 +187,13 @@ export default defineBackground(() => {
               ok: true,
               consent,
               theme,
+              language,
               paused: session?.paused ?? false,
               excluded: Boolean(session?.excluded || session?.deleted),
             };
           }
           if (!consent && !generic)
-            return { ok: true, consent: false, saved: false, theme };
+            return { ok: true, consent: false, saved: false, theme, language };
           if (type === "keeptemp:capture") {
             if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
@@ -408,14 +226,17 @@ export default defineBackground(() => {
             ok: true,
             consent: true,
             theme,
+            language,
             paused: session?.paused ?? false,
             excluded: Boolean(session?.excluded || session?.deleted),
           };
         } catch {
           return { ok: false, error: "storage-failed" };
         }
-      })().then(sendResponse, () =>
-        sendResponse({ ok: false, error: "storage-failed" }),
+      })().then(
+        (result) => sendResponse({ ...result, theme, language }),
+        () =>
+          sendResponse({ ok: false, error: "storage-failed", theme, language }),
       );
       return true;
     },

@@ -2,9 +2,8 @@ import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
 import { mountChatGPTHistory } from "../src/chatgpt-history";
-import { continuationPageState, submitContinuation } from "../src/continuation";
-import { ChatGPTAdapter } from "../src/adapters/chatgpt";
-import { currentChatError, CurrentChatError } from "../src/current-chat";
+import { version } from "../package.json";
+import { translate, localizeInterface, type Locale } from "../src/i18n";
 export default defineContentScript({
   matches: [
     "https://chatgpt.com/*",
@@ -14,13 +13,11 @@ export default defineContentScript({
   ],
   runAt: "document_idle",
   main(ctx) {
+    let locale: Locale = "en";
     const history =
       location.origin === "https://chatgpt.com"
         ? mountChatGPTHistory(ctx)
         : undefined;
-    const submittedTokens = new Set<string>();
-    let continuationNotice: HTMLElement | undefined;
-    ctx.onInvalidated(() => continuationNotice?.remove());
     const adapter = createPlatformAdapter(
       document,
       () => new URL(location.href),
@@ -46,24 +43,31 @@ export default defineContentScript({
       consent = false,
       activeId = "";
     const say = (s: string) => {
-      label.textContent = `KeepTemp · ${s}`;
+      label.textContent = `KeepTemp · ${translate(s, locale)}`;
       host.dataset.state = s.includes("Saved")
         ? "saved"
         : s.includes("失败")
           ? "error"
           : "idle";
     };
+    localizeInterface(shadow, locale);
     const send = (request: BridgeRequest) =>
       browser.runtime.sendMessage(request) as Promise<BridgeResponse>;
     const state = async (id?: string) => {
       const r = await send({ type: "keeptemp:state", id });
       if (!r?.ok) throw Error();
+      locale = r.language ?? "en";
+      history?.setLocale(locale);
+      localizeInterface(shadow, locale);
       if (r.theme === "system") delete host.dataset.theme;
       else if (r.theme) host.dataset.theme = r.theme;
       consent = r.consent === true;
       paused = r.paused === true;
       excluded = r.excluded === true;
-      pause.textContent = paused ? "恢复（含可见内容）" : "暂停";
+      pause.textContent = translate(
+        paused ? "恢复（含可见内容）" : "暂停",
+        locale,
+      );
       controls.hidden = !consent || !id || excluded;
       return r;
     };
@@ -106,7 +110,12 @@ export default defineContentScript({
     exclude.onclick = async () => {
       const id = activeId;
       if (!id) return;
-      if (!confirm("排除此会话并删除其本地副本？后续不再保存。")) return;
+      if (
+        !confirm(
+          translate("排除此会话并删除其本地副本？后续不再保存。", locale),
+        )
+      )
+        return;
       if (!(await acquireAction(exclude, id))) {
         say("设置未完成，请重试");
         return;
@@ -285,94 +294,12 @@ export default defineContentScript({
         !sender.url?.startsWith(browser.runtime.getURL("/"))
       )
         return;
-      if (
-        request?.type === "keeptemp:continuation-page" &&
-        location.origin === "https://chatgpt.com"
-      ) {
-        reply({
-          ok: true,
-          ...continuationPageState(document, new URL(location.href)),
-          snapshot: new ChatGPTAdapter(
-            document,
-            () => new URL(location.href),
-            true,
-          ).read(),
-        });
-        return false;
-      }
-      if (
-        request?.type === "keeptemp:resume-current" &&
-        location.origin === "https://chatgpt.com"
-      ) {
-        history?.close();
-        document
-          .querySelector<HTMLElement>(
-            '#prompt-textarea[contenteditable="true"],textarea#prompt-textarea',
-          )
-          ?.focus();
-        reply({ ok: true, resumed: true });
-        return false;
-      }
-      if (request?.type === "keeptemp:submit-continuation") {
-        if (
-          location.origin !== "https://chatgpt.com" ||
-          typeof request.token !== "string" ||
-          typeof request.text !== "string" ||
-          !request.text ||
-          request.text.length > 2_100_000 ||
-          submittedTokens.has(request.token)
-        ) {
-          reply({ ok: false, error: "handoff-cancelled" });
-          return false;
-        }
-        submittedTokens.add(request.token);
-        history?.close();
-        continuationNotice?.remove();
-        const notice = document.createElement("div");
-        notice.id = "keeptemp-continuation-status";
-        notice.style.cssText =
-          "position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:min(90vw,640px);z-index:2147483647";
-        const shadow = notice.attachShadow({ mode: "open" });
-        shadow.innerHTML =
-          '<style>:host{font:13px/1.6 system-ui}div{display:flex;gap:12px;padding:12px 16px;background:#212121;color:#eee;border:1px solid #666;border-radius:12px}button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit}</style><div><span role="status">KeepTemp · 正在确认临时模式并接续…</span><button aria-label="关闭接续提示">×</button></div>';
-        shadow
-          .querySelector("button")!
-          .addEventListener("click", () => notice.remove());
-        document.body.append(notice);
-        continuationNotice = notice;
-        void submitContinuation(
-          document,
-          () => new URL(location.href),
-          request.text,
-          async (step) =>
-            Boolean(
-              (
-                await browser.runtime.sendMessage({
-                  type: "keeptemp:handoff-check",
-                  token: request.token,
-                  step,
-                })
-              )?.ok,
-            ),
-          ctx.signal,
-        ).then(
-          (result) => {
-            shadow.querySelector('[role="status"]')!.textContent = result.ok
-              ? "KeepTemp · 已在当前页面发送接续背景"
-              : currentChatError(new CurrentChatError(result.error));
-            if (result.ok) ctx.setTimeout(() => notice.remove(), 8000);
-            reply(result);
-          },
-          () => reply({ ok: false, error: "handoff-unavailable" }),
-        );
-        return true;
-      }
       if (request?.type === "keeptemp:open-library") {
-        reply({ ok: Boolean(history?.open()) });
+        reply({ ok: Boolean(history?.open()), version });
         return false;
       }
       if (request?.type === "keeptemp:ping") {
-        reply({ ok: true });
+        reply({ ok: true, version });
         return false;
       }
       if (request?.type === "keeptemp:inspect-current") {

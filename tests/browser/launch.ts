@@ -1,4 +1,4 @@
-import { chromium } from "@playwright/test";
+import { chromium, expect, type Page } from "@playwright/test";
 
 // Every caller supplies a disposable profile. Never attach to a user's browser.
 export async function launchExtension(profile: string, extension: string) {
@@ -34,4 +34,14 @@ export async function launchExtension(profile: string, extension: string) {
     await context.close();
     throw error;
   }
+}
+
+// Existing regression scenarios are in Chinese; select it through the real UI.
+// Fresh production installs still default to English.
+export async function chineseUI(page: Page) {
+  const toggle = page.locator(".language-toggle");
+  await expect(toggle).toBeEnabled();
+  if ((await toggle.getAttribute("aria-label")) === "中文")
+    await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
 }

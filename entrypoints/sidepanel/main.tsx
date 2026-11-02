@@ -7,18 +7,18 @@ import {
 import { browser } from "wxt/browser";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { StorageRepository } from "../../src/storage";
 import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
-import {
-  continueInChatGPT,
-  recordCurrentPage,
-  currentChatError,
-} from "../../src/current-chat";
+import { recordCurrentPage, currentChatError } from "../../src/current-chat";
 import "../../src/style.css";
 import { EmbeddedHistory } from "./embedded";
+import { translate, type Locale } from "../../src/i18n";
+import { MenuItems, menuKeys } from "./menu";
 const repo = new StorageRepository();
-function dateLabel(value: number) {
+function dateLabel(value: number, locale: Locale) {
+  const t = (value: string) => translate(value, locale);
   const d = new Date(value),
     now = new Date();
   const today = new Date(
@@ -27,12 +27,18 @@ function dateLabel(value: number) {
     now.getDate(),
   ).getTime();
   return value >= today
-    ? `今天 ${d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    ? `${t("Today")} ${d.toLocaleTimeString(locale === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit" })}`
     : value >= today - 86400000
-      ? "昨天"
-      : d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+      ? t("Yesterday")
+      : d.toLocaleDateString(locale === "zh" ? "zh-CN" : "en", {
+          month: "short",
+          day: "numeric",
+        });
 }
 function App() {
+  const [locale, setLocale] = useState<Locale>("en");
+  const t = (value: string, params?: Record<string, string | number>) =>
+    translate(value, locale, params);
   const [consent, setConsent] = useState<boolean | null>(null),
     [enabled, setEnabled] = useState(false),
     [sessions, setSessions] = useState<Session[]>([]),
@@ -51,6 +57,7 @@ function App() {
   const [enabledOn, setEnabledOn] = useState<PlatformId[]>([]);
   const target = PLATFORMS.find((p) => p.id === destination)!;
   const [menuId, setMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -66,7 +73,7 @@ function App() {
     const outside = (event: PointerEvent) => {
       if (
         !(event.target instanceof Element) ||
-        !event.target.closest(".session-actions")
+        !event.target.closest(".session-actions,.session-menu")
       )
         setMenuId(null);
     };
@@ -96,7 +103,8 @@ function App() {
     const platforms = await repo.enabledPlatforms();
     const generic = await repo.genericCount();
     const theme = await repo.darkMode();
-    return { c, e, s, platforms, generic, theme };
+    const chinese = await repo.chineseUI();
+    return { c, e, s, platforms, generic, theme, chinese };
   }
   function apply(data: Awaited<ReturnType<typeof load>>) {
     setConsent(data.c);
@@ -105,8 +113,12 @@ function App() {
     setEnabledOn(data.platforms);
     setGenericCount(data.generic);
     setThemePreference(data.theme);
+    setLocale(data.chinese ? "zh" : "en");
     setDark(data.theme ?? matchMedia("(prefers-color-scheme: dark)").matches);
   }
+  useEffect(() => {
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+  }, [locale]);
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -118,7 +130,11 @@ function App() {
       } catch {
         if (active) {
           setFailed(true);
-          setNotice("暂时无法读取本地记录，请检查浏览器存储设置。");
+          setNotice(
+            t(
+              "Could not read local records. Check your browser's storage settings.",
+            ),
+          );
         }
       }
     };
@@ -161,9 +177,9 @@ function App() {
   async function run(
     task: () => Promise<void | string>,
     success = "",
-    failure:
-      | string
-      | ((error: unknown) => string) = "操作未完成，请检查本地存储空间后重试。",
+    failure: string | ((error: unknown) => string) = t(
+      "The action could not be completed. Check local storage and try again.",
+    ),
   ) {
     if (mutationActive.current) return;
     setBusy(true);
@@ -185,12 +201,19 @@ function App() {
   }
   function deleteSession(session: Session) {
     setMenuId(null);
-    if (!confirm(`删除“${session.title}”？无法撤销，也不会删除平台端的记录。`))
+    if (
+      !confirm(
+        t(
+          "Delete “{title}”? This cannot be undone and does not delete the website record.",
+          { title: session.title },
+        ),
+      )
+    )
       return;
     void run(async () => {
       await repo.delete(session.id);
       setSelected((id) => (id === session.id ? null : id));
-    }, "已删除本地对话");
+    }, t("Local conversation deleted"));
   }
   function exportFile(s: Session, kind: "md" | "json") {
     const url = URL.createObjectURL(
@@ -206,11 +229,11 @@ function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function sourceLabel(s: Session) {
-    if (s.source !== "generic") return platformName(s.source);
+    if (s.source !== "generic") return t(platformName(s.source));
     try {
       return new URL(s.sourceOrigin!).hostname;
     } catch {
-      return "网页对话";
+      return t("Web conversation");
     }
   }
   const visible = sessions.filter(
@@ -226,18 +249,28 @@ function App() {
         <button
           className="brand"
           onClick={() => setSelected(null)}
-          aria-label="返回对话列表"
+          aria-label={t("Back to conversations")}
         >
           ▱ <strong>KeepTemp</strong>
         </button>
         <div className="header-actions">
+          <button
+            className="language-toggle"
+            disabled={busy || consent === null}
+            aria-label={locale === "en" ? "中文" : "English"}
+            onClick={() => run(() => repo.setChineseUI(locale !== "zh"))}
+          >
+            {locale === "en" ? "中文" : "EN"}
+          </button>
           <span className="badge">
-            <span aria-hidden="true">●</span> 仅存本机
+            <span aria-hidden="true">●</span> {t("On this device")}{" "}
           </span>
           <button
             className="theme-toggle"
-            aria-label={dark ? "切换为浅色" : "切换为深色"}
-            title={dark ? "切换为浅色" : "切换为深色"}
+            aria-label={
+              dark ? t("Switch to light mode") : t("Switch to dark mode")
+            }
+            title={dark ? t("Switch to light mode") : t("Switch to dark mode")}
             disabled={busy}
             onClick={() =>
               run(async () => {
@@ -272,104 +305,100 @@ function App() {
       </header>
       {notice && (
         <div className="toast" data-tone={failed ? "error" : "success"}>
-          <p role="status">{notice}</p>
-          <button aria-label="关闭提示" onClick={() => setNotice("")}>
+          <p role="status">{t(notice)}</p>
+          <button
+            aria-label={t("Dismiss notice")}
+            onClick={() => setNotice("")}
+          >
             ×
           </button>
         </div>
       )}
       {consent === null ? (
-        <p>正在打开本地记录…</p>
+        <p>{t("Opening local records…")}</p>
       ) : !consent ? (
         <section className="welcome">
           <h1>
-            临时对话，
-            <br />
-            留在你手中。
+            {t("Temporary chats,")} <br />
+            {t("yours to keep.")}{" "}
           </h1>
           <p>
-            照常聊天，自动留一份在本机。
-            <br />
-            想继续时，随时找回。
+            {t("Chat as usual. Keep a copy on your device.")} <br />
+            {t("Find it when you need it.")}{" "}
           </p>
           <div className="card">
-            <h3>开始之前</h3>
+            <h3>{t("Before you start")}</h3>
             <p>
-              对话文字保存在这台设备，不上传到 KeepTemp 服务器，不需要账号或 API
-              Key。
+              {t(
+                "Chat text stays in this browser. No account, API key, or KeepTemp server.",
+              )}
             </p>
             <p>
-              本地保存不改变网站的历史或数据保留规则。数据库未加密；卸载扩展或清理浏览器可能丢失记录，请按需导出。
+              {t(
+                "Local saving does not change the website's history or retention. The database is not encrypted. Export important records before uninstalling or clearing browser data.",
+              )}{" "}
             </p>
-            <p>接续保留文字背景，不恢复附件、工具或原服务端状态。</p>
+            <p>
+              {t(
+                "Continuation carries text only. It does not restore attachments, tools, or the original server session.",
+              )}
+            </p>
           </div>
           <button
             className="primary full"
             disabled={busy}
             onClick={() => run(() => repo.authorize())}
           >
-            我了解并同意本地保存
+            {t("I understand and agree to local saving")}{" "}
           </button>
-          <small>同意后，点击记录当前对话即可开始。</small>
+          <small>{t("Then choose Record current chat to start.")}</small>
         </section>
       ) : current ? (
         <section className="conversation-view">
           <div className="conversation-nav">
             <button className="back-button" onClick={() => setSelected(null)}>
-              <span aria-hidden="true">←</span> 返回
+              <span aria-hidden="true">←</span> {t("Back")}{" "}
             </button>
             <button
               className="danger delete-session"
               disabled={busy}
               onClick={() => deleteSession(current)}
             >
-              删除会话
+              {t("Delete conversation")}{" "}
             </button>
           </div>
           <div className="meta">
-            {sourceLabel(current)} · {dateLabel(current.updatedAt)} ·{" "}
-            {current.messages.length} 条消息
-            {current.excluded ? " · 已停止保存" : ""}
+            {sourceLabel(current)} · {dateLabel(current.updatedAt, locale)} ·{" "}
+            {current.messages.length} {t("messages")}{" "}
+            {current.excluded ? t(" · Recording stopped") : ""}
           </div>
           <h1>{current.title}</h1>
           <div className="toolbar">
-            {destination === "chatgpt" && (
-              <button
-                className="primary"
-                disabled={busy}
-                aria-label="在当前页面接续"
-                onClick={() =>
-                  run(
-                    async () => {
-                      await continueInChatGPT(current.id);
-                    },
-                    "已在当前页面接续，请查看聊天页面。",
-                    "自动接续未完成，请检查当前聊天页面；仍可使用复制并接续。",
-                  )
-                }
-              >
-                接着聊 ↗
-              </button>
-            )}
             <button
-              className={destination === "chatgpt" ? "" : "primary"}
+              className="primary"
               disabled={busy}
               onClick={() =>
                 run(
                   async () => {
-                    await navigator.clipboard.writeText(context(current));
+                    await navigator.clipboard.writeText(
+                      context(current, locale),
+                    );
                     setCopied(true);
                   },
-                  "已复制历史与接续提示词。打开新临时会话，粘贴发送即可。",
-                  "未能写入剪贴板，请检查浏览器权限后重试。",
+                  t(
+                    "History and continuation prompt copied. Paste into a new temporary chat and send.",
+                  ),
+                  t(
+                    "Could not copy. Check browser clipboard access and try again.",
+                  ),
                 )
               }
             >
-              {copied ? "已复制 ✓" : "复制并接续"}
+              {copied ? t("Copied ✓") : t("Copy & continue")}
             </button>
             <select
               className="platform-select"
-              aria-label="接续平台"
+              aria-label={t("Continue with")}
               value={destination}
               onChange={(e) => {
                 if (isPlatform(e.target.value)) setDestination(e.target.value);
@@ -384,42 +413,44 @@ function App() {
             <a
               className="button"
               href={target.url}
-              aria-label={`打开 ${target.name}`}
-              title={`打开 ${target.name}`}
+              aria-label={t("Open {platform}", { platform: target.name })}
+              title={t("Open {platform}", { platform: target.name })}
               target="_blank"
               rel="noreferrer"
             >
-              打开 ↗
+              {t("Open ↗")}{" "}
             </a>
           </div>
           <small>
-            {destination === "chatgpt"
-              ? "「接着聊」会在当前 ChatGPT 标签页接续；复制操作仅写入剪贴板。"
-              : "已包含完整历史与接续提示词。请在目标平台先开启临时／隐身模式，再粘贴发送。"}
+            {t(
+              "Includes the full conversation and a continuation prompt. Enable temporary or incognito mode on the destination, then paste and send.",
+            )}{" "}
           </small>
-          {longContext(current) && (
+          {longContext(current, locale) && (
             <p className="notice">
-              这段对话较长，可能超过所选模型的上下文容量。复制内容保持完整，不会自动截断。
+              {t(
+                "This conversation is long and may exceed the destination model's context limit. The copy stays complete; nothing is truncated.",
+              )}{" "}
             </p>
           )}
           <div className="messages">
             {current.messages.map((m) => (
               <article key={m.id}>
                 <span className="eyebrow">
-                  {m.role === "user" ? "你" : sourceLabel(current)}
+                  {m.role === "user" ? t("You") : sourceLabel(current)}
                 </span>
                 <p>{m.text}</p>
               </article>
             ))}
           </div>
           <details className="tools">
-            <summary>管理这段对话</summary>
+            <summary>{t("Conversation options")}</summary>
             <div className="tool-actions">
               <button onClick={() => exportFile(current, "md")}>
-                导出 Markdown
+                {t("Export Markdown")}{" "}
               </button>
               <button onClick={() => exportFile(current, "json")}>
-                导出 JSON
+                {t("Export JSON")}{" "}
               </button>
               {!current.excluded && current.source !== "manual" && (
                 <button
@@ -427,11 +458,11 @@ function App() {
                   onClick={() =>
                     run(
                       () => repo.exclude(current.id),
-                      "已停止保存此会话，现有记录保留。",
+                      t("Recording stopped. Your existing copy is kept."),
                     )
                   }
                 >
-                  停止保存此会话
+                  {t("Stop recording this conversation")}{" "}
                 </button>
               )}
             </div>
@@ -441,34 +472,55 @@ function App() {
         <section>
           <div className="shelf-heading">
             <div>
-              <h1>你的对话</h1>
+              <h1>{t("Your chats")}</h1>
             </div>
-            <span className="count">{sessions.length} 段</span>
+            <span className="count">
+              {sessions.length} {t("chats")}
+            </span>
           </div>
           <div className="capture-strip" data-enabled={enabled}>
             <span className="status-dot" aria-hidden="true" />
             <div>
-              <strong>{enabled ? "自动保存已开启" : "自动保存尚未开启"}</strong>
+              <strong>
+                {enabled ? t("Auto-save is on") : t("Auto-save is off")}
+              </strong>
               <small>
                 {enabled
-                  ? `${[...enabledOn.map(platformName), ...(genericCount ? [`${genericCount} 段网页对话`] : [])].join("、")} 已启用`
-                  : "只保存可识别的临时对话。"}
+                  ? t("{platforms} enabled", {
+                      platforms: [
+                        ...enabledOn.map(platformName),
+                        ...(genericCount
+                          ? [
+                              t("{count} web conversations", {
+                                count: genericCount,
+                              }),
+                            ]
+                          : []),
+                      ].join(locale === "zh" ? "、" : ", "),
+                    })
+                  : t(
+                      "Only identifiable temporary chats are saved automatically.",
+                    )}
               </small>
             </div>
             <button
               className="toggle"
-              aria-label={enabled ? "关闭自动保存" : "启用自动保存"}
+              aria-label={
+                enabled ? t("Turn off auto-save") : t("Enable auto-save")
+              }
               disabled={busy}
               onClick={() =>
                 run(
                   () => repo.setAutoCapture(!enabled),
                   enabled
-                    ? "已关闭自动保存"
-                    : "已开启自动保存。已有聊天可点击“记录当前对话”，无需刷新。",
+                    ? t("Auto-save turned off")
+                    : t(
+                        "Auto-save enabled. Use Record current chat for a conversation already in progress; no refresh needed.",
+                      ),
                 )
               }
             >
-              {enabled ? "关闭" : "开启"}
+              {enabled ? t("Off") : t("On")}
             </button>
           </div>
           <button
@@ -483,20 +535,22 @@ function App() {
                   listScroll.current = 0;
                   window.scrollTo(0, 0);
                 },
-                "已保存，后续将自动记录。",
+                t("Saved. New messages will keep updating."),
                 currentChatError,
               )
             }
           >
-            记录当前对话
+            {t("Record current chat")}{" "}
           </button>
           <small className="record-hint">
-            已经聊到一半？保存现有可读文字，并继续记录。
+            {t(
+              "Already chatting? Save the readable text and keep recording.",
+            )}{" "}
           </small>
           <div className="new-chat-row">
             <select
               className="platform-select"
-              aria-label="新会话平台"
+              aria-label={t("New chat platform")}
               value={destination}
               onChange={(e) => {
                 if (isPlatform(e.target.value)) setDestination(e.target.value);
@@ -514,22 +568,25 @@ function App() {
               target="_blank"
               rel="noreferrer"
             >
-              ＋ 打开 {target.name} <span aria-hidden="true">↗</span>
+              {t("＋ Open")} {target.name} <span aria-hidden="true">↗</span>
             </a>
           </div>
           {destination !== "chatgpt" && (
             <small className="platform-hint">
-              {target.name} 自动保存为实验支持；打开后请先开启临时／隐身模式。
+              {target.name}{" "}
+              {t(
+                "Auto-save is experimental. Enable temporary or incognito mode on the website first.",
+              )}{" "}
             </small>
           )}
           <input
-            aria-label="全文搜索"
+            aria-label={t("Full-text search")}
             type="search"
-            placeholder="搜索对话…"
+            placeholder={t("Search conversations…")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <div className="list" aria-label="本地会话">
+          <div className="list" aria-label={t("Local conversations")}>
             {visible.length ? (
               visible.map((s) => (
                 <div className="session-row" key={s.id}>
@@ -544,15 +601,19 @@ function App() {
                             setEditingId(null);
                             focusActions(s.id);
                           },
-                          "名称已更新",
-                          "重命名未完成，请输入 1–100 个字符，并确认对话仍然存在。",
+                          t("Name updated"),
+                          t(
+                            "Could not rename. Use 1–100 characters and check that the conversation still exists.",
+                          ),
                         );
                       }}
                     >
-                      <label htmlFor="session-name">重命名会话</label>
+                      <label htmlFor="session-name">
+                        {t("Rename conversation")}
+                      </label>
                       <input
                         id="session-name"
-                        aria-label="会话名称"
+                        aria-label={t("Conversation name")}
                         autoFocus
                         required
                         maxLength={100}
@@ -572,7 +633,7 @@ function App() {
                           type="submit"
                           disabled={busy || !editingTitle.trim()}
                         >
-                          保存名称
+                          {t("Save name")}{" "}
                         </button>
                         <button
                           type="button"
@@ -581,7 +642,7 @@ function App() {
                             focusActions(s.id);
                           }}
                         >
-                          取消
+                          {t("Cancel")}{" "}
                         </button>
                       </div>
                     </form>
@@ -597,13 +658,13 @@ function App() {
                         <span className="session-meta">
                           <span>
                             {sourceLabel(s)}
-                            {s.excluded ? " · 已停止保存" : ""}
+                            {s.excluded ? t(" · Recording stopped") : ""}
                           </span>
                           <time
                             dateTime={new Date(s.updatedAt).toISOString()}
                             title={new Date(s.updatedAt).toLocaleString()}
                           >
-                            {dateLabel(s.updatedAt)}
+                            {dateLabel(s.updatedAt, locale)}
                           </time>
                         </span>
                         <strong>{s.title}</strong>
@@ -611,7 +672,7 @@ function App() {
                           {s.messages.at(-1)?.text.slice(0, 100)}
                         </span>
                         <span className="message-count">
-                          {s.messages.length} 条消息{" "}
+                          {s.messages.length} {t("messages")}{" "}
                           <span aria-hidden="true">→</span>
                         </span>
                       </button>
@@ -619,75 +680,55 @@ function App() {
                         <button
                           id={`session-actions-${s.id}`}
                           className="more-trigger"
-                          aria-label={`会话操作：${s.title}`}
+                          aria-label={t("Conversation actions: {title}", {
+                            title: s.title,
+                          })}
                           aria-haspopup="menu"
                           aria-expanded={menuId === s.id}
                           aria-controls={`session-menu-${s.id}`}
                           disabled={busy}
-                          onClick={() =>
-                            setMenuId(menuId === s.id ? null : s.id)
-                          }
+                          onClick={(event) => {
+                            const rect =
+                              event.currentTarget.getBoundingClientRect();
+                            setMenuPosition({
+                              left: Math.max(
+                                8,
+                                Math.min(innerWidth - 220, rect.right - 210),
+                              ),
+                              top: Math.max(
+                                8,
+                                Math.min(innerHeight - 126, rect.bottom + 6),
+                              ),
+                            });
+                            setMenuId(menuId === s.id ? null : s.id);
+                          }}
                         >
                           ⋯
                         </button>
-                        {menuId === s.id && (
-                          <div
-                            ref={menuRef}
-                            className="session-menu"
-                            id={`session-menu-${s.id}`}
-                            role="menu"
-                            aria-label="会话操作"
-                            onKeyDown={(e) => {
-                              if (
-                                ![
-                                  "ArrowDown",
-                                  "ArrowUp",
-                                  "Home",
-                                  "End",
-                                ].includes(e.key)
-                              )
-                                return;
-                              e.preventDefault();
-                              const items = [
-                                ...e.currentTarget.querySelectorAll<HTMLButtonElement>(
-                                  '[role="menuitem"]',
-                                ),
-                              ];
-                              const index = items.indexOf(
-                                document.activeElement as HTMLButtonElement,
-                              );
-                              items[
-                                e.key === "Home"
-                                  ? 0
-                                  : e.key === "End"
-                                    ? items.length - 1
-                                    : (index +
-                                        (e.key === "ArrowDown"
-                                          ? 1
-                                          : items.length - 1)) %
-                                      items.length
-                              ]?.focus();
-                            }}
-                          >
-                            <button
-                              role="menuitem"
-                              onClick={() => {
-                                setMenuId(null);
-                                setEditingTitle(s.title);
-                                setEditingId(s.id);
-                              }}
+                        {menuId === s.id &&
+                          createPortal(
+                            <div
+                              ref={menuRef}
+                              className="session-menu"
+                              style={menuPosition}
+                              id={`session-menu-${s.id}`}
+                              role="menu"
+                              aria-label={t("Conversation actions")}
+                              onKeyDown={menuKeys}
                             >
-                              重命名
-                            </button>
-                            <button
-                              role="menuitem"
-                              className="danger"
-                              onClick={() => deleteSession(s)}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        )}
+                              <MenuItems
+                                locale={locale}
+                                deleteLabel="Delete"
+                                onRename={() => {
+                                  setMenuId(null);
+                                  setEditingTitle(s.title);
+                                  setEditingId(s.id);
+                                }}
+                                onDelete={() => deleteSession(s)}
+                              />
+                            </div>,
+                            document.body,
+                          )}
                       </div>
                     </>
                   )}
@@ -696,27 +737,34 @@ function App() {
             ) : (
               <div className="empty">
                 <div className="empty-icon">▱</div>
-                <h3>{query ? "没有找到相关对话" : "还没有保存的对话"}</h3>
+                <h3>
+                  {query
+                    ? t("No matching conversations")
+                    : t("No saved conversations yet")}
+                </h3>
                 <p>
                   {query
-                    ? "换个关键词试试，标题和正文都可以搜。"
-                    : "在聊天网页点击记录当前对话，保存成功后会出现在这里。"}
+                    ? t(
+                        "Try another keyword. Titles and message text are searchable.",
+                      )
+                    : t(
+                        "Choose Record current chat on the chat page. Saved conversations appear here.",
+                      )}
                 </p>
                 {query && (
                   <button className="link" onClick={() => setQuery("")}>
-                    清除搜索
+                    {t("Clear search")}{" "}
                   </button>
                 )}
               </div>
             )}
           </div>
           <details className="tools">
-            <summary>本地数据与隐私</summary>
+            <summary>{t("Local data & privacy")}</summary>
             <p className="settings-note">
-              记录只在此浏览器中保存，没有云同步。Claude、Grok、Gemini
-              为实验适配，通用／DeepSeek
-              也尚待真实账号验收。点击记录后会持续保存当前会话；清空会撤回本地保存授权，浏览器
-              网站访问权限可在扩展设置另行撤回。数据库未加密，卸载扩展可能丢失数据。请在对话内导出需要备份的记录。
+              {t(
+                "Records stay in this browser with no cloud sync. Claude, Grok, Gemini, generic sites, and DeepSeek have experimental adapters awaiting broader live-account validation. Recording keeps updating this conversation. Clear data revokes local capture consent; website access can be revoked separately in extension settings. The database is not encrypted, and uninstalling may remove it. Export important records for backup.",
+              )}{" "}
             </p>
             <button
               className="danger link"
@@ -724,20 +772,24 @@ function App() {
               onClick={() => {
                 if (
                   confirm(
-                    "清空所有本地记录并撤回保存授权？无法撤销。已导出的文件和平台端记录不会被删除。",
+                    t(
+                      "Clear all local records and revoke saving consent? This cannot be undone. Exports and website records are kept.",
+                    ),
                   )
                 )
                   void run(async () => {
                     await repo.reset();
                     setSelected(null);
                     setQuery("");
-                  }, "全部本地记录与授权已清空");
+                  }, t("All local records and consent cleared"));
               }}
             >
-              清空所有数据并撤回授权
+              {t("Clear all data and revoke consent")}{" "}
             </button>
           </details>
-          <p className="local-note">仅存本机 · 无云同步 · 随时删除</p>
+          <p className="local-note">
+            {t("Local only · No cloud sync · Delete anytime")}
+          </p>
         </section>
       )}
     </main>
@@ -748,7 +800,7 @@ const surface = params.get("surface");
 const scope = params.get("scope") ?? "";
 createRoot(document.getElementById("root")!).render(
   window.parent !== window &&
-    (surface === "list" || surface === "reader") &&
+    (surface === "list" || surface === "reader" || surface === "menu") &&
     /^[a-zA-Z0-9-]{20,80}$/.test(scope) ? (
     <EmbeddedHistory
       repo={repo}

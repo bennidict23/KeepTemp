@@ -24,6 +24,12 @@ export class StorageRepository {
   async darkMode() {
     return (await this.db).get("meta", "dark-mode");
   }
+  async chineseUI() {
+    return Boolean(await (await this.db).get("meta", "ui-chinese"));
+  }
+  async setChineseUI(chinese: boolean) {
+    await (await this.db).put("meta", chinese, "ui-chinese");
+  }
   async setDarkMode(dark: boolean) {
     await (await this.db).put("meta", dark, "dark-mode");
   }

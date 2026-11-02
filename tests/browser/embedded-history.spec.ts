@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { launchExtension } from "./launch";
+import { chineseUI, launchExtension } from "./launch";
 import { shell, turn } from "../fixtures";
 import { context as continuation } from "../../src/recovery";
 import type { Session } from "../../src/model";
@@ -112,8 +112,13 @@ test.beforeEach(async () => {
   );
   admin = await browser.newPage();
   await admin.goto(`${base}/sidepanel.html`);
+  if (!test.info().title.startsWith("English")) await chineseUI(admin);
   await expect(
-    admin.getByRole("button", { name: "我了解并同意本地保存" }),
+    admin.getByRole("button", {
+      name: test.info().title.startsWith("English")
+        ? "I understand and agree to local saving"
+        : "我了解并同意本地保存",
+    }),
   ).toBeVisible();
 });
 test.afterEach(async () => {
@@ -260,7 +265,10 @@ test("rename, full-text search, delete and explicit re-record reflect committed 
   await list(p)
     .getByRole("button", { name: `会话操作：${title}` })
     .click();
-  await list(p).getByRole("menuitem", { name: "重命名" }).click();
+  await p
+    .frameLocator("#keeptemp-history-menu")
+    .getByRole("menuitem", { name: "重命名" })
+    .click();
   await list(p).getByRole("textbox", { name: "会话名称" }).fill("合成新标题");
   await list(p).getByRole("button", { name: "保存", exact: true }).click();
   await list(p).getByRole("searchbox").fill("小而可靠");
@@ -268,7 +276,10 @@ test("rename, full-text search, delete and explicit re-record reflect committed 
     list(p).getByRole("button", { name: "合成新标题", exact: true }),
   ).toBeVisible();
   await list(p).getByRole("button", { name: "会话操作：合成新标题" }).click();
-  await list(p).getByRole("menuitem", { name: "删除本机记录" }).click();
+  await p
+    .frameLocator("#keeptemp-history-menu")
+    .getByRole("menuitem", { name: "删除本机记录" })
+    .click();
   await list(p).getByRole("button", { name: "确认删除" }).click();
   await expect.poll(records).toHaveLength(0);
   await p
@@ -388,16 +399,19 @@ test("theme follows ChatGPT and layout stays inside the available main area", as
 test("clear all removes every platform's text and authorization without resurrection", async () => {
   await seed([sample(), sample("claude-record", "claude")], true);
   const p = await chat();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
   await list(p).locator("summary", { hasText: "仅本机" }).click();
   await list(p)
     .getByRole("button", { name: "清空 KeepTemp 全部本机数据" })
     .click();
   await list(p).getByRole("button", { name: "确认清空" }).click();
   await expect(
-    list(p).getByRole("button", { name: "同意并开启本地记录" }),
+    list(p).getByRole("button", { name: "Agree and enable local recording" }),
   ).toBeVisible();
   await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
-    "尚未授权",
+    "Not authorized",
   );
   expect(await records()).toEqual([]);
 });
@@ -534,272 +548,11 @@ test("extension history loads with a restrictive parent frame policy", async () 
   await expect(reader(p).locator("h1")).toHaveText("合成面试准备");
 });
 
-function continuationPage(kind = "textarea", behavior = "accept") {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}nav{width:260px;position:fixed;inset:0 auto 0 0;background:#f9f9f9}main{margin-left:260px;min-height:100vh;padding:40px}</style></head><body>
-  <nav aria-label="Chat history"><div data-app-action-sidebar-scroll></div></nav>
-  <header>${behavior === "unknown" ? "" : `<button data-testid="temporary-chat-button" aria-pressed="${behavior === "off" ? "false" : "true"}">Temporary</button>`}</header>
-  <main><form>${kind === "textarea" ? `<textarea id="prompt-textarea">${behavior === "draft" ? "用户未发送的合成草稿" : ""}</textarea>` : '<div id="prompt-textarea" contenteditable="true" style="white-space:pre-wrap"></div>'}<button type="button" data-testid="send-button" disabled>Send</button></form></main>
-  ${behavior === "dialog" ? '<div role="dialog" aria-modal="true">合成平台提示</div>' : ""}
-  <script>
-  const editor = document.getElementById('prompt-textarea'), send = document.querySelector('[data-testid="send-button"]');
-  const read = () => editor.tagName === 'TEXTAREA' ? editor.value : editor.innerText;
-  editor.addEventListener('input', () => {
-    send.disabled = ${behavior === "hold" ? "true" : "!read()"};
-    ${behavior === "mode-change" ? 'document.querySelector("header button").setAttribute("aria-pressed", "false");' : ""}
-  });
-  send.addEventListener('click', () => {
-    document.body.dataset.syntheticSendCount = String(Number(document.body.dataset.syntheticSendCount || '0') + 1);
-    ${behavior === "unconfirmed" ? "return;" : ""}
-    const user = document.createElement('div'); user.dataset.messageAuthorRole = 'user'; user.dataset.messageId = 'synthetic-new-user';
-    const content = document.createElement('p'); content.dataset.userMessageBubble = 'true'; content.textContent = read(); user.append(content); document.querySelector('main').append(user);
-    if (editor.tagName === 'TEXTAREA') editor.value = ''; else editor.textContent = '';
-    send.disabled = true;
-  });
-  </script></body></html>`;
-}
-async function continuationTarget(kind = "textarea", behavior = "accept") {
-  await browser.route("https://chatgpt.com/**", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: continuationPage(kind, behavior),
-    }),
-  );
+test("removed continuation commands are rejected even from an older page script", async () => {
   await seed();
-  const p = await browser.newPage();
-  await p.goto("https://chatgpt.com/?temporary-chat=true");
-  await p.getByRole("button", { name: "本机历史 · KeepTemp" }).click();
-  await list(p)
-    .getByRole("button", { name: "合成面试准备", exact: true })
-    .click();
-  await expect(
-    reader(p).getByRole("button", { name: "在当前页面接续", exact: true }),
-  ).toBeEnabled();
-  return p;
-}
-async function launchContinuation(p: Page) {
-  await reader(p)
-    .getByRole("button", { name: "在当前页面接续", exact: true })
-    .click();
-  return p;
-}
-for (const kind of ["textarea", "contenteditable"]) {
-  test(`ready ${kind} continues in the same tab in under one second with exact context`, async () => {
-    const p = await continuationTarget(kind),
-      count = browser.pages().length;
-    await p.evaluate(
-      () => (document.documentElement.dataset.sameDocument = "preserved"),
-    );
-    const start = Date.now();
-    await launchContinuation(p);
-    await expect(p.locator('[data-message-author-role="user"]')).toHaveText(
-      continuation(sample()),
-    );
-    const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(1000);
-    console.info(`Synthetic ready ${kind} continuation: ${elapsed}ms`);
-    expect(browser.pages()).toHaveLength(count);
-    expect(
-      await p.evaluate(() => document.documentElement.dataset.sameDocument),
-    ).toBe("preserved");
-    await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
-    await expect(p.locator("body")).toHaveAttribute(
-      "data-synthetic-send-count",
-      "1",
-    );
-  });
-}
-test("missing header marker uses capture's temporary URL evidence without waiting", async () => {
-  const p = await continuationTarget("textarea", "unknown");
-  const start = Date.now();
-  await launchContinuation(p);
-  await expect(p.locator('[data-message-author-role="user"]')).toHaveText(
-    continuation(sample()),
-  );
-  expect(Date.now() - start).toBeLessThan(1000);
-});
-for (const behavior of ["draft", "mode-change", "off", "dialog"]) {
-  test(`same-tab continuation refuses ${behavior} quickly without sending`, async () => {
-    const p = await continuationTarget("textarea", behavior),
-      count = browser.pages().length;
-    const start = Date.now();
-    await launchContinuation(p);
-    const status =
-      behavior === "draft"
-        ? reader(p).getByRole("status")
-        : p.locator("#keeptemp-continuation-status").getByRole("status");
-    await expect(status).toContainText("未发送");
-    expect(Date.now() - start).toBeLessThan(2000);
-    expect(browser.pages()).toHaveLength(count);
-    await expect(p.locator('[data-message-author-role="user"]')).toHaveCount(0);
-    await expect(p.locator("#prompt-textarea")).toHaveValue(
-      behavior === "draft" ? "用户未发送的合成草稿" : "",
-    );
-  });
-}
-for (const kind of ["textarea", "contenteditable"]) {
-  test(`deleting the source cancels pending same-tab ${kind} send`, async () => {
-    const p = await continuationTarget(kind, "hold");
-    await launchContinuation(p);
-    await expect
-      .poll(() =>
-        p
-          .locator("#prompt-textarea")
-          .evaluate((el) =>
-            el instanceof HTMLTextAreaElement
-              ? el.value
-              : (el as HTMLElement).innerText,
-          ),
-      )
-      .toBe(continuation(sample()));
-    await list(p)
-      .getByRole("button", { name: "会话操作：合成面试准备" })
-      .click();
-    await list(p)
-      .getByRole("menuitem", { name: "删除本机记录", exact: true })
-      .click();
-    await list(p)
-      .getByRole("button", { name: "确认删除", exact: true })
-      .click();
-    await p
-      .locator('[data-testid="send-button"]')
-      .evaluate((node) => ((node as HTMLButtonElement).disabled = false));
-    await expect(
-      p.locator("#keeptemp-continuation-status").getByRole("status"),
-    ).toContainText("未发送");
-    await expect
-      .poll(() =>
-        p
-          .locator("#prompt-textarea")
-          .evaluate((el) =>
-            el instanceof HTMLTextAreaElement
-              ? el.value
-              : (el as HTMLElement).innerText.trim(),
-          ),
-      )
-      .toBe("");
-    await expect(p.locator("body")).not.toHaveAttribute(
-      "data-synthetic-send-count",
-    );
-  });
-}
-test("a live saved conversation returns instantly without replaying context or losing its draft", async () => {
-  await seed([], true);
-  const p = await chat();
-  await expect(
-    list(p).getByRole("button", { name: "把临时对话留在手中", exact: true }),
-  ).toBeVisible();
-  await p.evaluate(() => {
-    const input = document.querySelector<HTMLInputElement>("#composer")!;
-    const editor = document.createElement("textarea");
-    editor.id = "prompt-textarea";
-    editor.value = "正在写的合成草稿";
-    input.replaceWith(editor);
-    document.documentElement.dataset.sameDocument = "preserved";
-  });
-  await list(p)
-    .getByRole("button", { name: "把临时对话留在手中", exact: true })
-    .click();
-  await expect(
-    reader(p).getByRole("button", { name: "在当前页面接续" }),
-  ).toBeEnabled();
-  const count = browser.pages().length,
-    url = p.url(),
-    start = Date.now();
-  await launchContinuation(p);
-  await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
-  expect(Date.now() - start).toBeLessThan(1000);
-  expect(browser.pages()).toHaveLength(count);
-  expect(p.url()).toBe(url);
-  await expect(p.locator("#prompt-textarea")).toHaveValue("正在写的合成草稿");
-  await expect(p.locator("#prompt-textarea")).toBeFocused();
-  await expect(p.locator("[data-user-message-bubble]")).toHaveCount(1);
-  expect(
-    await p.evaluate(() => document.documentElement.dataset.sameDocument),
-  ).toBe("preserved");
-});
-test("a different unsaved conversation is never discarded", async () => {
-  await seed();
-  const p = await chat();
-  await list(p)
-    .getByRole("button", { name: "合成面试准备", exact: true })
-    .click();
-  const url = p.url();
-  await launchContinuation(p);
-  await expect(reader(p).getByRole("status")).toContainText(
-    "当前对话尚未完整保存",
-  );
-  expect(p.url()).toBe(url);
-  await expect(p.locator("[data-user-message-bubble]")).toHaveCount(1);
-});
-test("committed current conversation survives same-tab switching to another saved record", async () => {
-  await seed([sample()], true);
-  const p = await chat();
-  await expect.poll(records).toHaveLength(2);
-  await browser.route("https://chatgpt.com/**", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: continuationPage(),
-    }),
-  );
-  await list(p)
-    .getByRole("button", { name: "合成面试准备", exact: true })
-    .click();
-  const count = browser.pages().length;
-  await launchContinuation(p);
-  await expect(p.locator('[data-message-author-role="user"]')).toHaveText(
-    continuation(sample()),
-  );
-  expect(browser.pages()).toHaveLength(count);
-  expect(
-    (await records()).some((s) =>
-      s.messages.some((m) => m.text === "把临时对话留在手中"),
-    ),
-  ).toBe(true);
-});
-test("an unacknowledged send warns within two seconds and never retries", async () => {
-  const p = await continuationTarget("textarea", "unconfirmed"),
-    start = Date.now();
-  await launchContinuation(p);
-  await expect(
-    p.locator("#keeptemp-continuation-status").getByRole("status"),
-  ).toContainText("未能确认网页接收");
-  expect(Date.now() - start).toBeLessThan(2200);
-  await expect(p.locator("body")).toHaveAttribute(
-    "data-synthetic-send-count",
-    "1",
-  );
-});
-test("concurrent requests for one tab never duplicate context", async () => {
-  const p = await continuationTarget(),
-    count = browser.pages().length;
-  const results = await admin.evaluate(async () => {
-    const chrome = (
-      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
-    ).chrome;
-    return Promise.all([
-      chrome.runtime.sendMessage({
-        type: "keeptemp:continue",
-        id: "local-synthetic",
-      }),
-      chrome.runtime.sendMessage({
-        type: "keeptemp:continue",
-        id: "local-synthetic",
-      }),
-    ]);
-  });
-  expect(results.filter((r) => r?.ok)).toHaveLength(1);
-  expect(results.find((r) => !r?.ok)?.error).toBe("handoff-busy");
-  expect(browser.pages()).toHaveLength(count);
-  await expect(p.locator("body")).toHaveAttribute(
-    "data-synthetic-send-count",
-    "1",
-  );
-});
-test("website content scripts cannot request an automatic send", async () => {
-  const p = await continuationTarget(),
-    count = browser.pages().length;
+  const p = await chat(),
+    count = browser.pages().length,
+    url = p.url();
   const result = await admin.evaluate(async (url) => {
     const chrome = (
       globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
@@ -813,93 +566,168 @@ test("website content scripts cannot request an automatic send", async () => {
             chrome: typeof import("wxt/browser").browser;
           }
         ).chrome;
-        return chrome.runtime.sendMessage({
-          type: "keeptemp:continue",
-          id: "local-synthetic",
-        });
+        return Promise.all([
+          chrome.runtime.sendMessage({
+            type: "keeptemp:handoff-check",
+            token: "synthetic-old-task",
+            step: "send",
+          }),
+          chrome.runtime.sendMessage({
+            type: "keeptemp:continue",
+            id: "local-synthetic",
+          }),
+        ]);
       },
     });
-  }, p.url());
-  expect(result[0]?.result).toEqual({ ok: false, error: "invalid-source" });
+  }, url);
+  expect(result[0]?.result).toEqual([
+    { ok: false, error: "unsupported-request" },
+    { ok: false, error: "unsupported-request" },
+  ]);
   expect(browser.pages()).toHaveLength(count);
+  expect(p.url()).toBe(url);
+  await list(p)
+    .getByRole("button", { name: "合成面试准备", exact: true })
+    .click();
+  await expect(
+    reader(p).getByRole("button", { name: "接着聊", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    reader(p).getByRole("button", { name: "复制并接续", exact: true }),
+  ).toBeVisible();
+  await expect(p.locator("#composer")).toHaveValue("");
 });
 
-test("switching cannot interrupt a streaming current conversation", async () => {
-  await seed([sample()], true);
-  const p = await chat();
-  await p.evaluate(() => {
-    const b = document.createElement("button");
-    b.dataset.testid = "stop-button";
-    document.querySelector("main")!.append(b);
-  });
+test("English is the default; language persists and syncs without translating records", async () => {
+  await expect(admin.locator("html")).toHaveAttribute("lang", "en");
+  await seed();
+  const p = await browser.newPage();
+  await p.goto("https://chatgpt.com/?temporary-chat=true");
+  await p
+    .getByRole("button", { name: "Local history · KeepTemp", exact: true })
+    .click();
+  await expect(
+    list(p).getByRole("searchbox", { name: "Search local history" }),
+  ).toBeVisible();
   await list(p)
     .getByRole("button", { name: "合成面试准备", exact: true })
     .click();
-  const url = p.url();
-  await launchContinuation(p);
-  await expect(reader(p).getByRole("status")).toContainText("仍在生成");
-  expect(p.url()).toBe(url);
-  await expect(p.locator("[data-user-message-bubble]")).toHaveCount(1);
-});
-test("failed preservation keeps the original page and uncommitted text intact", async () => {
-  await seed([sample()], true);
-  const p = await chat();
-  await expect.poll(records).toHaveLength(2);
-  await list(p)
-    .getByRole("button", { name: "合成面试准备", exact: true })
+  await expect(reader(p).locator(".embedded-message p")).toHaveText(
+    sample().messages.map((m) => m.text),
+  );
+  await reader(p)
+    .getByRole("button", { name: "Copy & continue", exact: true })
     .click();
-  const worker = browser.serviceWorkers()[0]!;
-  await worker.evaluate(() => {
-    const proto = IDBObjectStore.prototype;
-    Object.defineProperty(proto, "originalPut", {
-      value: proto.put,
-      configurable: true,
-    });
-    const original = proto.put;
-    proto.put = function (
-      this: IDBObjectStore,
-      ...args: Parameters<typeof proto.put>
-    ) {
-      if (this.name === "sessions")
-        throw new DOMException("synthetic", "QuotaExceededError");
-      return original.apply(this, args);
-    };
-  });
-  const url = p.url();
-  try {
-    await p
-      .locator("[data-markdown-text-style] p")
-      .evaluate((el) => (el.textContent = "合成未提交尾部"));
-    await launchContinuation(p);
-    await expect(reader(p).getByRole("status")).toContainText(
-      "当前对话尚未完整保存",
-    );
-    expect(p.url()).toBe(url);
-    await expect(p.locator("[data-markdown-text-style] p")).toHaveText(
-      "合成未提交尾部",
-    );
-  } finally {
-    await worker.evaluate(() => {
-      const proto =
-        IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
-          originalPut: typeof IDBObjectStore.prototype.put;
-        };
-      proto.put = proto.originalPut;
-      delete (proto as Partial<typeof proto>).originalPut;
-    });
-  }
+  await expect(reader(p).getByRole("status")).toContainText(
+    "Full history and continuation prompt copied",
+  );
+  await browser.grantPermissions(["clipboard-read"]);
+  await admin.bringToFront();
+  expect(await admin.evaluate(() => navigator.clipboard.readText())).toBe(
+    continuation(sample(), "en"),
+  );
+  await expect(p.locator("#composer")).toHaveValue("");
+  await browser.clearPermissions();
+  await p.bringToFront();
+  await reader(p).getByRole("button", { name: "中文", exact: true }).click();
+  await expect(
+    reader(p).getByRole("button", { name: "复制并接续", exact: true }),
+  ).toBeVisible();
+  await expect(
+    list(p).getByRole("searchbox", { name: "搜索本机历史" }),
+  ).toBeVisible();
+  await expect(
+    p.getByRole("button", { name: "本机历史 · KeepTemp", exact: true }),
+  ).toBeVisible();
+  await expect(reader(p).locator(".embedded-message p")).toHaveText(
+    sample().messages.map((m) => m.text),
+  );
+  await expect(admin.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await admin.reload();
+  await expect(admin.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await reader(p).getByRole("button", { name: "English", exact: true }).click();
+  await expect(
+    reader(p).getByRole("button", { name: "Copy & continue", exact: true }),
+  ).toBeVisible();
+  expect((await records())[0]).toEqual(sample());
 });
-test("an embedded Continue action stays bound to its tab even when another tab is active", async () => {
-  const p = await continuationTarget();
-  const q = await browser.newPage();
-  await q.goto("https://chatgpt.com/?temporary-chat=true&synthetic-other=true");
-  await q.locator("#prompt-textarea").fill("另一个标签页的合成草稿");
-  await launchContinuation(p);
-  await expect(p.locator('[data-message-author-role="user"]')).toHaveText(
-    continuation(sample()),
-  );
-  await expect(q.locator("#prompt-textarea")).toHaveValue(
-    "另一个标签页的合成草稿",
-  );
-  await expect(q.locator('[data-message-author-role="user"]')).toHaveCount(0);
+
+test("English floating menu stays outside the sidebar, supports keyboard and closes cleanly", async () => {
+  await seed();
+  const p = await browser.newPage();
+  await p.goto("https://chatgpt.com/?temporary-chat=true");
+  await p
+    .getByRole("button", { name: "Local history · KeepTemp", exact: true })
+    .click();
+  const trigger = list(p).getByRole("button", {
+    name: "Conversation actions: 合成面试准备",
+  });
+  await trigger.click();
+  const menu = p.frameLocator("#keeptemp-history-menu");
+  await expect(menu.getByRole("menuitem")).toHaveCount(2);
+  await expect(
+    menu.getByRole("menuitem", { name: "Rename", exact: true }),
+  ).toBeFocused();
+  await menu
+    .getByRole("menuitem", { name: "Rename", exact: true })
+    .press("ArrowDown");
+  await expect(
+    menu.getByRole("menuitem", { name: "Delete local copy", exact: true }),
+  ).toBeFocused();
+  const rect = (await p.locator("#keeptemp-history-menu").boundingBox())!;
+  const listRect = (await p.locator("#keeptemp-history-list").boundingBox())!;
+  expect(rect.x + rect.width).toBeGreaterThan(listRect.x + listRect.width);
+  expect(rect.x).toBeGreaterThanOrEqual(0);
+  expect(rect.y + rect.height).toBeLessThanOrEqual(p.viewportSize()!.height);
+  expect(
+    await menu
+      .locator("html")
+      .evaluate(
+        (el) =>
+          el.scrollWidth <= el.clientWidth &&
+          el.scrollHeight <= el.clientHeight,
+      ),
+  ).toBe(true);
+  await p.screenshot({
+    path: "test-results/history-menu-light.png",
+    animations: "disabled",
+  });
+  // Escape removes its focused iframe; send the key without waiting for that
+  // now-detached frame to finish a navigation. Verify the visible result below.
+  await p.keyboard.press("Escape");
+  await expect(p.locator("#keeptemp-history-menu")).toHaveCount(0);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await p.evaluate(() => document.documentElement.classList.add("dark"));
+  await trigger.click();
+  await expect(menu.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(
+    menu.getByRole("menuitem", { name: "Rename", exact: true }),
+  ).toBeVisible();
+  await p.screenshot({
+    path: "test-results/history-menu-dark.png",
+    animations: "disabled",
+  });
+  await p.locator("#composer").click();
+  await expect(p.locator("#keeptemp-history-menu")).toHaveCount(0);
+  await trigger.click();
+  await menu.getByRole("menuitem", { name: "Rename", exact: true }).click();
+  await list(p)
+    .getByRole("textbox", { name: "Conversation name", exact: true })
+    .fill("Synthetic project notes");
+  await list(p).getByRole("button", { name: "Save", exact: true }).click();
+  await expect
+    .poll(async () => (await records())[0]?.title)
+    .toBe("Synthetic project notes");
+  await list(p)
+    .getByRole("button", {
+      name: "Conversation actions: Synthetic project notes",
+    })
+    .click();
+  await menu
+    .getByRole("menuitem", { name: "Delete local copy", exact: true })
+    .click();
+  await list(p)
+    .getByRole("button", { name: "Confirm delete", exact: true })
+    .click();
+  await expect.poll(records).toHaveLength(0);
 });

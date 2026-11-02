@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { launchExtension } from "./launch";
+import { chineseUI, launchExtension } from "./launch";
 import {
   shell,
   turn,
@@ -47,6 +47,7 @@ test.beforeEach(async () => {
   );
   panel = await browser.newPage();
   await panel.goto(`${base}/sidepanel.html`);
+  await chineseUI(panel);
   await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
 });
 async function enable() {
@@ -73,6 +74,7 @@ async function clear() {
   await expect(privacy).toHaveAttribute("open", "");
   panel.once("dialog", (d) => d.accept());
   await panel.getByRole("button", { name: "清空所有数据并撤回授权" }).click();
+  await chineseUI(panel);
   await expect(
     panel.getByRole("button", { name: "我了解并同意本地保存" }),
   ).toBeVisible();

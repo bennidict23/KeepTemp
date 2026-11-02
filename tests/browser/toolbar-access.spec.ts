@@ -9,7 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import { genericFixture } from "../fixtures";
-import { launchExtension } from "./launch";
+import { chineseUI, launchExtension } from "./launch";
 
 // This suite uses the shipping manifest unchanged: neither test host grants nor
 // mocked Chrome permission APIs may mask toolbar/activeTab integration failures.
@@ -40,6 +40,7 @@ test.beforeAll(async () => {
     );
   panel = await context.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+  await chineseUI(panel);
   await panel.getByRole("button", { name: "我了解并同意本地保存" }).click();
   chat = await context.newPage();
   await chat.goto("https://toolbar-chat.example/chat/synthetic");
