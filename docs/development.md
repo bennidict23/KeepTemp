@@ -31,7 +31,7 @@ tests/browser/       隔离浏览器集成测试
 docs/                架构、可行性及本指南
 ```
 
-WXT、TypeScript、Vitest 和 Playwright 的配置分别服务构建、类型检查、单元测试和浏览器测试。`.wxt/`、`.output/`、`test-results/`、`playwright-report/` 和依赖目录都是本机生成物，不提交。临时截图输出到 `test-results/`；README 只保留两张主题展示图。
+WXT、TypeScript、Vitest 和 Playwright 的配置分别服务构建、类型检查、单元测试和浏览器测试。`.wxt/`、`.output/`、`test-results/`、`playwright-report/` 和依赖目录都是本机生成物，不提交。临时截图输出到 `test-results/`；README 只保留两张使用场景截图，平台演示采用虚构对话。
 
 ## 必须守住的行为
 
