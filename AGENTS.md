@@ -1,6 +1,7 @@
 # Project guidance
 
-- Purpose: retain temporary AI conversations locally, find them later, and continue with one copied transcript plus continuation prompt. Keep the existing chat website as the main workflow.
+- Primary motivation: people sharing an AI subscription may not want co-users to see their questions in the common history. Temporary/incognito chats address that history concern but make useful conversations hard to retain. Lead product copy with this privacy-versus-retention tension; accidental closure and convenience are secondary benefits. Never imply the extension itself isolates a shared account.
+- Purpose: let people keep using temporary chat while retaining a personal local text copy, finding it later, and continuing with one copied transcript plus continuation prompt. Keep the existing chat website as the main workflow.
 - Keep the product small: capture, storage, search/read, context copy, export, rename/delete and pause controls. No cloud, accounts, telemetry, AI summaries, developer screens or repeated confirmation flows.
 - After first-use consent, one explicit Record click may save ordinary or unknown-mode conversations too. Automatic capture without that click still requires confirmed temporary mode. A new generic conversation needs its own explicit grant.
 - Never bypass pause/exclusion or storage failures. Show Saved only after commit; the record action must also verify the stored row. Repeated recording updates the same conversation. Deletion blocks automatic resurrection; an explicit re-record may save only currently readable content.
