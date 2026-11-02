@@ -4,9 +4,7 @@
 
 [English](README.md) · **简体中文**
 
-### Shared AI accounts. Your own local history.<br>Different AI models. One personal library.
-
-<a href="https://chatgpt.com"><img src="docs/chatgpt-icon.png" width="24" height="24" alt=""> ChatGPT</a> &nbsp; <a href="https://claude.ai"><img src="docs/claude-icon.svg" width="24" height="24" alt=""> Claude</a>
+### 把 AI 临时对话保存为本机历史记录的浏览器扩展。
 
 [**📥 下载安装包**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [安装步骤](#安装)
 

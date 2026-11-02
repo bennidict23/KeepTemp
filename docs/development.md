@@ -35,8 +35,6 @@ docs/                架构、可行性及本指南
 
 WXT、TypeScript、Vitest 和 Playwright 的配置分别服务构建、类型检查、单元测试和浏览器测试。`.wxt/`、`.output/`、`test-results/`、`playwright-report/` 和依赖目录都是本机生成物，不提交。临时截图输出到 `test-results/`；README 保留三张完整使用场景原图，平台演示采用虚构对话。
 
-README 的平台图标取自 [OpenAI 官方 App 图标说明](https://help.openai.com/en/articles/8142208-chatgpt-ios-and-android-app-faq)及 [Claude 网站 favicon](https://claude.ai/favicon.svg)，用于标识兼容平台，相关标识归各权利人。
-
 ## 必须守住的行为
 
 | 场景                                          | 预期                                           |

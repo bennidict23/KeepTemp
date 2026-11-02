@@ -4,9 +4,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-### Shared AI accounts. Your own local history.<br>Different AI models. One personal library.
-
-<a href="https://chatgpt.com"><img src="docs/chatgpt-icon.png" width="24" height="24" alt=""> ChatGPT</a> &nbsp; <a href="https://claude.ai"><img src="docs/claude-icon.svg" width="24" height="24" alt=""> Claude</a>
+### A browser extension to save temporary AI chats as local history.
 
 [**📥 Download**](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [Install](#install)
 
