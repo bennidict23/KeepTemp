@@ -12,6 +12,50 @@ export default defineBackground(() => {
   // Native side-panel auto-opening does not grant activeTab. Handle the real
   // action so Chrome grants it, then open synchronously within that user gesture.
   browser.action.onClicked.addListener((tab) => {
+    if (
+      tab.id !== undefined &&
+      tab.url?.startsWith("https://chatgpt.com/") &&
+      !/^\/(share|auth|login)(\/|$)/.test(new URL(tab.url).pathname)
+    ) {
+      const tabId = tab.id;
+      void (async () => {
+        let opened = false;
+        try {
+          const result = await browser.tabs.sendMessage(
+            tabId,
+            { type: "keeptemp:open-library" },
+            { frameId: 0 },
+          );
+          opened = Boolean(result?.ok);
+          if (!opened) throw new Error("library-unavailable");
+        } catch {
+          try {
+            await browser.scripting.executeScript({
+              target: { tabId },
+              files: ["/content-scripts/capture.js"],
+            });
+            const result = await browser.tabs.sendMessage(
+              tabId,
+              { type: "keeptemp:open-library" },
+              { frameId: 0 },
+            );
+            opened = Boolean(result?.ok);
+          } catch {
+            /* The side panel remains available from Chrome's panel selector. */
+          }
+        }
+        // Opening a native side panel after asynchronous work may lose the user
+        // gesture. Keep this branch inside ChatGPT; other sites open synchronously.
+        await browser.action.setBadgeText({ tabId, text: opened ? "" : "!" });
+        await browser.action.setTitle({
+          tabId,
+          title: opened
+            ? "Open KeepTemp"
+            : "未能打开本机历史。请检查网站访问权限；也可从浏览器侧栏选择 KeepTemp。",
+        });
+      })().catch(() => {});
+      return;
+    }
     if (tab.windowId !== undefined)
       void browser.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
   });

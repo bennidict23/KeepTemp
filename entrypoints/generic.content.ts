@@ -216,7 +216,6 @@ export default defineContentScript({
     >[0] = (request, sender, reply) => {
       if (
         sender.id !== browser.runtime.id ||
-        sender.tab ||
         !sender.url?.startsWith(browser.runtime.getURL("/"))
       )
         return;

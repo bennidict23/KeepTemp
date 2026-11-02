@@ -1,6 +1,6 @@
 {
   "name": "keeptemp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Save temporary AI chats locally and pick up where you left off.",
   "license": "MIT",
   "engines": {

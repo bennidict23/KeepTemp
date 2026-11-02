@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
+import { mountChatGPTHistory } from "../src/chatgpt-history";
 export default defineContentScript({
   matches: [
     "https://chatgpt.com/*",
@@ -10,6 +11,10 @@ export default defineContentScript({
   ],
   runAt: "document_idle",
   main(ctx) {
+    const history =
+      location.origin === "https://chatgpt.com"
+        ? mountChatGPTHistory(ctx)
+        : undefined;
     const adapter = createPlatformAdapter(
       document,
       () => new URL(location.href),
@@ -271,10 +276,13 @@ export default defineContentScript({
     >[0] = (request, sender, reply) => {
       if (
         sender.id !== browser.runtime.id ||
-        sender.tab ||
         !sender.url?.startsWith(browser.runtime.getURL("/"))
       )
         return;
+      if (request?.type === "keeptemp:open-library") {
+        reply({ ok: Boolean(history?.open()) });
+        return false;
+      }
       if (request?.type === "keeptemp:ping") {
         reply({ ok: true });
         return false;

@@ -14,6 +14,12 @@ export default defineConfig({
       "https://gemini.google.com/*",
     ],
     minimum_chrome_version: "116",
+    web_accessible_resources: [
+      {
+        resources: ["sidepanel.html", "chunks/*", "assets/*"],
+        matches: ["https://chatgpt.com/*"],
+      },
+    ],
     action: { default_title: "Open KeepTemp" },
     content_security_policy: {
       extension_pages:

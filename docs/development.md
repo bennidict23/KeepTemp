@@ -23,6 +23,7 @@ src/adapters/        平台 DOM 规则与通用提取
 src/model.ts         数据模型、通信协议与快照校验
 src/platforms.ts     平台入口及 origin 注册表
 src/current-chat.ts  当前页接管与主动记录
+src/chatgpt-history.ts  ChatGPT 侧栏入口及扩展框架挂载
 src/storage.ts       IndexedDB、授权与增量合并
 src/recovery.ts      文字接续与导出格式
 src/style.css        侧栏样式与黑白主题
@@ -52,6 +53,8 @@ WXT、TypeScript、Vitest 和 Playwright 的配置分别服务构建、类型检
 
 Vitest 使用 jsdom 和 fake-indexeddb，覆盖 DOM 身份、合并顺序、事务故障和控制器流程。Playwright 使用独立临时 profile，所有聊天请求返回合成 HTML，不读取私人 Chrome 配置或真实聊天。主要浏览器套件只给测试构建副本增加精确合成站点权限，以验证完整保存闭环。
 
+`embedded-history.spec.ts` 使用带合成原生侧栏的 ChatGPT 页面和未修改的生产 manifest，验证页面内的本机历史原型。包括首次授权、流式保存、普通聊天主动保存、删除重存、搜索、导航、刷新、多标签页、主题、清空和存储失败；还验证扩展框架复用原数据库、网站不能直接读取历史 DOM，以及严格父页 frame/clipboard 策略下的展示和复制。接续文本与完整存储记录逐字比较，不在网站自动粘贴或发送。真实账号的侧栏布局仍需人工体验；这些测试不代表已验证所有 ChatGPT 布局。
+
 工具栏套件使用未修改的生产 manifest，通过原生 CDP action 检查 activeTab 授予及跨 origin 撤回，并验证出现独立的原生侧栏页面目标，避免把普通标签页中的 UI 当作侧栏成功。另检查点击记录到达原生权限请求。弹窗等待期间不显示 Saved；测试不代替用户点击原生授权。允许／拒绝由控制器单元测试和精确预授权站点覆盖。
 
 ## 浏览器兼容验证
@@ -65,6 +68,8 @@ Vitest 使用 jsdom 和 fake-indexeddb，覆盖 DOM 身份、合并顺序、事�
 | Brave          | 1.98.63（Chromium 156.0.8078.80） | 35 / 35 通过 |
 
 类型检查、114 项单元测试、生产构建与 ZIP 通过。统一浏览器提示文案后的最终构建，在 Edge、Brave 另各补测 4 项核心场景通过，覆盖流式保存、复制导出、原生侧栏和权限请求。
+
+ChatGPT 页面内历史原型另在 Chromium 156.0.8078.4 通过类型检查、114 项单元测试、47 项浏览器测试及 ZIP 构建，其中新增 12 项框架集成场景。返回和复制的首次点击另外连续复测通过。上表 Edge／Brave 的结果针对原侧栏版本；页面内原型未在这两个浏览器重新运行，也未做真实账号的布局验收。
 
 覆盖原生侧栏、工具栏访问、自动及主动保存、流式更新、导航与刷新、复制、导出、删除与重存、清空、主题和写入失败。Windows、Linux 及其他浏览器未做本轮实际运行；共享扩展代码不代表所有系统和旧版本都已验证。Firefox、Safari 当前未适配。
 

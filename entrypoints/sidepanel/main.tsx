@@ -12,6 +12,7 @@ import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
 import { recordCurrentPage, currentChatError } from "../../src/current-chat";
 import "../../src/style.css";
+import { EmbeddedHistory } from "./embedded";
 const repo = new StorageRepository();
 function dateLabel(value: number) {
   const d = new Date(value),
@@ -715,4 +716,20 @@ function App() {
     </main>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+const params = new URLSearchParams(location.search);
+const surface = params.get("surface");
+const scope = params.get("scope") ?? "";
+createRoot(document.getElementById("root")!).render(
+  window.parent !== window &&
+    (surface === "list" || surface === "reader") &&
+    /^[a-zA-Z0-9-]{20,80}$/.test(scope) ? (
+    <EmbeddedHistory
+      repo={repo}
+      surface={surface}
+      scope={scope}
+      theme={params.get("theme") ?? "light"}
+    />
+  ) : (
+    <App />
+  ),
+);
