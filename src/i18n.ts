@@ -107,8 +107,7 @@ const chinese: Record<string, string> = {
     "暂时无法读取本机记录，请稍后重试。",
   "The action could not be completed. Please try again.":
     "操作未完成，请稍后重试。",
-  "Back to ChatGPT": "返回 ChatGPT",
-  "← Back to ChatGPT": "← 返回 ChatGPT",
+  "Back to {platform}": "返回 {platform}",
   "Local copy · KeepTemp": "本机记录 · KeepTemp",
   "Delete local copy": "删除本机记录",
   "Agree to local saving in the sidebar first.": "请先在左侧同意本地保存。",
@@ -138,8 +137,11 @@ const chinese: Record<string, string> = {
   Enable: "开启",
   "Search local history": "搜索本机历史",
   "No matching records": "没有找到相关记录",
-  "Saved ChatGPT conversations appear here.":
-    "保存的 ChatGPT 对话会出现在这里。",
+  "Saved ChatGPT and Claude conversations appear here.":
+    "保存的 ChatGPT 和 Claude 对话会出现在这里。",
+  "New Claude chat ↗": "新 Claude 聊天 ↗",
+  "Enable incognito mode on Claude before pasting.":
+    "请先在 Claude 开启隐身模式，再粘贴发送。",
   Save: "保存",
   "Local only · Settings": "仅本机 · 设置",
   "Temporary mode is controlled by the website. You can also save ordinary chats manually; a local copy does not delete website history. Continuation carries text only. Export important records for backup.":

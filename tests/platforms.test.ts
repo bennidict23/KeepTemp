@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { createPlatformAdapter } from "../src/adapters/index";
-import { PLATFORMS, platformFromUrl } from "../src/platforms";
+import {
+  PLATFORMS,
+  platformFromUrl,
+  historyPlatformFromUrl,
+} from "../src/platforms";
 import { validSnapshot, scopedChatId } from "../src/model";
 import { StorageRepository } from "../src/storage";
 import { context } from "../src/recovery";
@@ -182,4 +186,22 @@ it("Grok recognizes a selected Private control, but never an unselected activati
   expect(adapter.mode()).toBe(false);
   document.querySelector("header button")!.removeAttribute("aria-pressed");
   expect(adapter.mode()).toBe(null);
+});
+
+it("limits embedded history to exact ChatGPT and Claude origins", () => {
+  expect(historyPlatformFromUrl("https://chatgpt.com/c/synthetic")?.id).toBe(
+    "chatgpt",
+  );
+  expect(historyPlatformFromUrl("https://claude.ai/chat/synthetic")?.id).toBe(
+    "claude",
+  );
+  for (const url of [
+    "https://grok.com/chat",
+    "https://gemini.google.com/app",
+    "https://claude.ai.example/chat",
+    "https://chatgpt.com.example/",
+    "http://claude.ai/",
+    "invalid",
+  ])
+    expect(historyPlatformFromUrl(url)).toBeUndefined();
 });

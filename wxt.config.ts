@@ -17,7 +17,7 @@ export default defineConfig({
     web_accessible_resources: [
       {
         resources: ["sidepanel.html", "chunks/*", "assets/*"],
-        matches: ["https://chatgpt.com/*"],
+        matches: ["https://chatgpt.com/*", "https://claude.ai/*"],
       },
     ],
     action: { default_title: "Open KeepTemp" },

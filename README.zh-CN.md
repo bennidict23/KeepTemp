@@ -16,7 +16,7 @@
 
 临时模式由网站提供；KeepTemp 保存你自己的本地副本，不会隐藏或删除账号已有的聊天历史。
 
-[下载安装包](https://github.com/bennidict23/KeepTemp/releases/download/v0.8.0/keeptemp.zip) · [安装步骤](#安装)
+[下载安装包](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip) · [安装步骤](#安装)
 
 [![ChatGPT 面试准备对话与 KeepTemp 侧栏，显示已保存的会话和 Saved 状态](docs/save-chat.png)](docs/save-chat.png)
 
@@ -26,11 +26,11 @@
 
 支持桌面 **Chrome（116+）、Microsoft Edge 和 Brave**，共用同一个安装包。
 
-1. [下载 keeptemp.zip](https://github.com/bennidict23/KeepTemp/releases/download/v0.8.0/keeptemp.zip)，解压到本地文件夹。
+1. [下载 keeptemp.zip](https://github.com/bennidict23/KeepTemp/releases/download/v0.9.0/keeptemp.zip)，解压到本地文件夹。
 2. 打开浏览器的扩展管理页：Chrome 为 `chrome://extensions`，Edge 为 `edge://extensions`，Brave 为 `brave://extensions`。
 3. 开启「开发者模式」，选择加载已解压的扩展，选中刚解压出来、包含 `manifest.json` 的文件夹。
 
-安装后可在工具栏固定 KeepTemp。ChatGPT 网页左侧会出现「Local history」入口，其他网站仍使用扩展侧栏。界面默认英文，可点击「中文」切换；语言与明暗主题会保存在本机。使用安装包无需安装 Node.js。
+安装后可在工具栏固定 KeepTemp。ChatGPT 和 Claude 网页左侧会出现「Local history」入口，其他网站仍使用扩展侧栏。界面默认英文，可点击「中文」切换；语言与明暗主题会保存在本机。使用安装包无需安装 Node.js。
 
 <details>
 <summary>从源码构建（开发者）</summary>
@@ -53,7 +53,7 @@ npm run build
 3. **照常聊天**：看到 `Saved`，就说明这次读到的文字已经存好。后续消息会继续更新，不用反复点击；也可以开启临时聊天的自动记录。
 4. **找回或继续**：从会话库打开记录，点「复制并接续」，在新聊天中粘贴并发送。复制的内容包含双方的完整文字记录和接续提示词，不需要自己重新整理背景。插件只复制文字，由你决定在哪里粘贴和发送。
 
-在 ChatGPT 中，点击网页左侧的「Local history」查看本机记录；中文界面显示为「本机历史」。记录会在主区域打开，返回后原网页聊天仍在。
+在 ChatGPT 和 Claude 中，点击网页左侧的「Local history」查看同一份本机记录，保留每段对话的来源标签；中文界面显示为「本机历史」。记录会在主区域打开，返回后原网页聊天仍在。
 
 关掉聊天标签页，已保存的记录仍能从会话库找到。支持全文搜索、重命名、删除和导出 Markdown／JSON；每条会话旁的「⋯」就是管理入口，网页上的状态菜单可以暂停记录。
 

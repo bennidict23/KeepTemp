@@ -1,4 +1,4 @@
-import { platformFromUrl } from "../src/platforms";
+import { platformFromUrl, historyPlatformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
 import { StorageRepository } from "../src/storage";
 import { version } from "../package.json";
@@ -16,8 +16,9 @@ export default defineBackground(() => {
   browser.action.onClicked.addListener((tab) => {
     if (
       tab.id !== undefined &&
-      tab.url?.startsWith("https://chatgpt.com/") &&
-      !/^\/(share|auth|login)(\/|$)/.test(new URL(tab.url).pathname)
+      tab.url &&
+      historyPlatformFromUrl(tab.url) &&
+      !/^\/(share|public|auth|login)(\/|$)/.test(new URL(tab.url).pathname)
     ) {
       const tabId = tab.id;
       void (async () => {
@@ -47,7 +48,7 @@ export default defineBackground(() => {
           }
         }
         // Opening a native side panel after asynchronous work may lose the user
-        // gesture. Keep this branch inside ChatGPT; other sites open synchronously.
+        // gesture. Embedded libraries use this branch; other sites open synchronously.
         await browser.action.setBadgeText({ tabId, text: opened ? "" : "!" });
         await browser.action.setTitle({
           tabId,

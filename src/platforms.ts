@@ -40,6 +40,15 @@ export function platformFromUrl(value: string | URL) {
     return undefined;
   }
 }
+export function historyPlatformFromUrl(value: string | URL) {
+  const platform = platformFromUrl(value);
+  return platform?.id === "chatgpt" || platform?.id === "claude"
+    ? platform
+    : undefined;
+}
+export type HistoryPlatform = NonNullable<
+  ReturnType<typeof historyPlatformFromUrl>
+>;
 export function platformName(id: unknown) {
   return PLATFORMS.find((p) => p.id === id)?.name ?? "助手";
 }

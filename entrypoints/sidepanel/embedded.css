@@ -110,12 +110,24 @@ html[data-embedded-surface] body {
   background: var(--soft);
 }
 .embedded-row-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
   flex: 1;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.embedded-row-title > span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.embedded-source {
+  font-size: 10px;
+  color: var(--muted);
 }
 .embedded-row button[aria-expanded] {
   font-size: 18px;

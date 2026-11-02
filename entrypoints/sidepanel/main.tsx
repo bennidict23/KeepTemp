@@ -1,5 +1,6 @@
 import {
   PLATFORMS,
+  historyPlatformFromUrl,
   platformName,
   isPlatform,
   type PlatformId,
@@ -798,12 +799,19 @@ function App() {
 const params = new URLSearchParams(location.search);
 const surface = params.get("surface");
 const scope = params.get("scope") ?? "";
+const embeddedPlatform = PLATFORMS.find(
+  (p) => p.id === (params.get("platform") ?? "chatgpt"),
+);
+const pagePlatform =
+  embeddedPlatform && historyPlatformFromUrl(embeddedPlatform.origin);
 createRoot(document.getElementById("root")!).render(
   window.parent !== window &&
+    pagePlatform &&
     (surface === "list" || surface === "reader" || surface === "menu") &&
     /^[a-zA-Z0-9-]{20,80}$/.test(scope) ? (
     <EmbeddedHistory
       repo={repo}
+      platform={pagePlatform}
       surface={surface}
       scope={scope}
       theme={params.get("theme") ?? "light"}

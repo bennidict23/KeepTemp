@@ -18,7 +18,7 @@ Chrome Manifest V3 扩展，使用 WXT、TypeScript、React 和 IndexedDB。运�
 
 侧栏调用 `src/current-chat.ts` 接管当前页面、检查结构、取得必要权限并提交。已适配站点的主动路径复用原生会话身份，避免自动／主动记录生成两份副本。内部预检和令牌用于防止授权过程中页面切换，不是用户预览或第二次确认。
 
-工具栏通过 `action.onClicked` 获得 activeTab。ChatGPT 页面打开站内的“本机历史”原型；已有页面可按需注入控制器，无需刷新临时对话。其他网站仍在用户手势中同步打开 Side Panel。默认 host 仅限四家已适配平台；其他 HTTPS origin 按需申请，成功后只注册该精确 origin 的内容脚本。通用 entrypoint 必须保持 `registration: runtime` 和 `matches: []`，避免 WXT 将可选权限扩大为默认全站访问。
+工具栏通过 `action.onClicked` 获得 activeTab。ChatGPT 和 Claude 页面打开站内的“本机历史”；已有页面可按需注入控制器，无需刷新临时对话。其他网站仍在用户手势中同步打开 Side Panel。默认 host 仅限四家已适配平台；其他 HTTPS origin 按需申请，成功后只注册该精确 origin 的内容脚本。通用 entrypoint 必须保持 `registration: runtime` 和 `matches: []`，避免 WXT 将可选权限扩大为默认全站访问。
 
 后台验证扩展身份、顶层 frame、可信 origin、消息格式及大小上限，来源以 sender 为准。通用站点用路由摘要区分页面，不落盘完整路径或查询参数。
 
@@ -38,8 +38,8 @@ Chrome Manifest V3 扩展，使用 WXT、TypeScript、React 和 IndexedDB。运�
 
 Side Panel 以纯文本展示，负责本地搜索、阅读、复制、导出、重命名和删除。主题默认跟随系统，手动选择后写入 IndexedDB；后台将主题同步给网页状态标记。界面默认英文，支持中文切换，语言偏好使用原有 meta 布尔存储，无需更改数据库结构；标题和正文不参与界面翻译。复制时仅接续提示词跟随所选语言。
 
-ChatGPT 页面内原型由 `src/chatgpt-history.ts` 挂载入口、`entrypoints/sidepanel/embedded.tsx` 展示列表和正文。列表放在网页原有侧栏，阅读页覆盖主区域；返回后原聊天仍在。找不到可见侧栏时，工具栏可打开一个紧凑的浮动列表。这里只显示 ChatGPT 来源，其他平台记录仍保存在原会话库中。
+ChatGPT 和 Claude 页面内会话库由 `src/page-history.ts` 挂载入口、`entrypoints/sidepanel/embedded.tsx` 展示列表和正文。列表放在网页原有侧栏，阅读页覆盖主区域；返回后原聊天仍在。找不到可见侧栏时，工具栏可打开一个紧凑的浮动列表。两边展示同一份 ChatGPT／Claude 本机记录并显示来源标签，复制和返回行为以当前网站为准；其他平台记录仍可从扩展 Side Panel 打开。Claude 的侧栏使用 aside／nav 和侧栏分组标记适配，无法定位时只在工具栏点击后显示浮动入口。
 
-历史标题和正文只渲染在扩展 origin 的 iframe 内，复用同一 IndexedDB；不写入网站 DOM、网站存储或 iframe URL。三点菜单同样使用扩展 origin 的独立浮层框架，避免被网页侧栏裁切；只提供重命名、删除，并支持键盘导航。列表、菜单与阅读页通过扩展同源 BroadcastChannel 传递选中记录 ID，每个网页实例有独立随机通道。与网站的 postMessage 仅传开关、主题和菜单坐标，校验 origin、发送窗口和通道；不传正文或记录 ID。可嵌入资源仅对 ChatGPT 开放。复制在扩展框架内由用户点击触发，兼容网页限制异步剪贴板 API 的情况；失败不显示已复制。
+历史标题和正文只渲染在扩展 origin 的 iframe 内，复用同一 IndexedDB；不写入网站 DOM、网站存储或 iframe URL。三点菜单同样使用扩展 origin 的独立浮层框架，避免被网页侧栏裁切；只提供重命名、删除，并支持键盘导航。列表、菜单与阅读页通过扩展同源 BroadcastChannel 传递选中记录 ID，每个网页实例有独立随机通道。与网站的 postMessage 仅传开关、主题和菜单坐标，校验 origin、发送窗口和通道；不传正文或记录 ID。可嵌入资源只对 chatgpt.com 和 claude.ai 开放；框架根据平台配置核对父页 origin，并使用每页独立通道。复制在扩展框架内由用户点击触发，兼容网页限制异步剪贴板 API 的情况；失败不显示已复制。
 
 DOM 不是稳定接口；未挂载历史、附件和隐藏工具状态无法补抓，立即关页可能丢失未提交的流式尾部。完整边界见 [隐私说明](../PRIVACY.md)，验证方式见 [开发指南](development.md)。

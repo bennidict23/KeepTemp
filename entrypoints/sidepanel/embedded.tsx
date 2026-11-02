@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { StorageRepository } from "../../src/storage";
 import type { Session } from "../../src/model";
+import { platformName, type HistoryPlatform } from "../../src/platforms";
 import { context, json, longContext, markdown } from "../../src/recovery";
 import { currentChatError, recordCurrentPage } from "../../src/current-chat";
 import "./embedded.css";
@@ -12,10 +13,17 @@ type Props = {
   surface: "list" | "reader" | "menu";
   scope: string;
   theme: string;
+  platform: HistoryPlatform;
 };
 type Confirmation = { kind: "delete"; session: Session } | { kind: "clear" };
 
-export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
+export function EmbeddedHistory({
+  repo,
+  surface,
+  scope,
+  theme,
+  platform,
+}: Props) {
   const [locale, setLocale] = useState<Locale>("en");
   const t = (value: string, params?: Record<string, string | number>) =>
     translate(value, locale, params);
@@ -42,7 +50,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
   const live = useRef(true);
   const current = sessions.find((s) => s.id === selected);
   const tellHost = (type: string) =>
-    parent.postMessage({ type, scope }, "https://chatgpt.com");
+    parent.postMessage({ type, scope }, platform.origin);
   const close = () => tellHost("keeptemp:history-close");
   const closeMenu = () => tellHost("keeptemp:menu-close");
 
@@ -51,7 +59,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     const [allowed, automatic, records, appearance, chinese] =
       await Promise.all([
         repo.consent(),
-        repo.autoCapture("chatgpt"),
+        repo.autoCapture(platform.id),
         repo.list(),
         repo.darkMode(),
         repo.chineseUI(),
@@ -61,7 +69,9 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     setEnabled(automatic);
     setDark(appearance);
     setLocale(chinese ? "zh" : "en");
-    setSessions(records.filter((s) => s.source === "chatgpt"));
+    setSessions(
+      records.filter((s) => s.source === "chatgpt" || s.source === "claude"),
+    );
   }
   useEffect(() => {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
@@ -83,8 +93,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
     });
     document.documentElement.dataset.embeddedSurface = surface;
     const updateTheme = (event: MessageEvent) => {
-      if (event.source !== parent || event.origin !== "https://chatgpt.com")
-        return;
+      if (event.source !== parent || event.origin !== platform.origin) return;
       if (event.data?.type === "keeptemp:menu-dismiss") setMenu(null);
       if (
         event.data?.type === "keeptemp:theme" &&
@@ -117,7 +126,11 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
         void repo
           .get(data.id)
           .then((session) => {
-            if (!session || session.deleted || session.source !== "chatgpt")
+            if (
+              !session ||
+              session.deleted ||
+              (session.source !== "chatgpt" && session.source !== "claude")
+            )
               return;
             setMenu(null);
             if (data.action === "rename") {
@@ -177,7 +190,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
       window.removeEventListener("message", updateTheme);
       window.removeEventListener("keyup", escape);
     };
-  }, [surface, scope, theme]);
+  }, [surface, scope, theme, platform]);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [selected]);
@@ -317,11 +330,14 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
             <button
               disabled={!interactive}
               onClick={close}
-              aria-label={t("Back to ChatGPT")}
+              aria-label={t("Back to {platform}", { platform: platform.name })}
             >
-              {t("← Back to ChatGPT")}{" "}
+              ← {t("Back to {platform}", { platform: platform.name })}{" "}
             </button>
-            <span>{t("Local copy · KeepTemp")}</span>
+            <span>
+              {current && `${platformName(current.source)} · `}
+              {t("Local copy · KeepTemp")}
+            </span>
             <button
               aria-label={locale === "en" ? "中文" : "English"}
               disabled={busy}
@@ -370,12 +386,10 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   >
                     {t("Copy & continue")}{" "}
                   </button>
-                  <a
-                    href="https://chatgpt.com/?temporary-chat=true"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {t("New temporary chat ↗")}{" "}
+                  <a href={platform.url} target="_blank" rel="noreferrer">
+                    {platform.id === "chatgpt"
+                      ? t("New temporary chat ↗")
+                      : t("New Claude chat ↗")}{" "}
                   </a>
                   <details>
                     <summary>{t("Export")}</summary>
@@ -387,6 +401,11 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                     </button>
                   </details>
                 </div>
+                {platform.id === "claude" && (
+                  <p className="embedded-caption">
+                    {t("Enable incognito mode on Claude before pasting.")}
+                  </p>
+                )}
                 <p className="embedded-caption">
                   {t(
                     "This is a local text copy. Continue in a new chat; the original server session is not restored.",
@@ -408,7 +427,11 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                       className={`embedded-message embedded-${m.role}`}
                       key={m.id}
                     >
-                      <span>{m.role === "user" ? t("You") : "ChatGPT"}</span>
+                      <span>
+                        {m.role === "user"
+                          ? t("You")
+                          : platformName(current.source)}
+                      </span>
                       <p>{m.text}</p>
                     </article>
                   ))}
@@ -444,7 +467,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                 onClick={() =>
                   run(async () => {
                     await repo.authorize();
-                    await repo.setAutoCapture(true, "chatgpt");
+                    await repo.setAutoCapture(true, platform.id);
                   }, t("Temporary chat recording enabled"))
                 }
               >
@@ -478,7 +501,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                       : t("Enable temporary auto-recording")
                   }
                   onClick={() =>
-                    run(() => repo.setAutoCapture(!enabled, "chatgpt"))
+                    run(() => repo.setAutoCapture(!enabled, platform.id))
                   }
                 >
                   {enabled ? t("Pause") : t("Enable")}
@@ -496,7 +519,9 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                   <p className="embedded-caption">
                     {query
                       ? t("No matching records")
-                      : t("Saved ChatGPT conversations appear here.")}
+                      : t(
+                          "Saved ChatGPT and Claude conversations appear here.",
+                        )}
                   </p>
                 )}
                 {matched.map((s) => (
@@ -528,10 +553,14 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                       <>
                         <button
                           className="embedded-row-title"
+                          aria-label={s.title}
                           onClick={() => open(s)}
                           title={s.title}
                         >
-                          {s.title}
+                          <span>{s.title}</span>
+                          <small className="embedded-source">
+                            {platformName(s.source)}
+                          </small>
                         </button>
                         <button
                           aria-label={t("Conversation actions: {title}", {
@@ -560,7 +589,7 @@ export function EmbeddedHistory({ repo, surface, scope, theme }: Props) {
                                 x: rect.left,
                                 y: rect.bottom,
                               },
-                              "https://chatgpt.com",
+                              platform.origin,
                             );
                           }}
                         >

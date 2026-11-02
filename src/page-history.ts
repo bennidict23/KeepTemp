@@ -1,10 +1,14 @@
 import { browser } from "wxt/browser";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { translate, type Locale } from "./i18n";
+import type { HistoryPlatform } from "./platforms";
 
 // Only empty UI containers enter the page DOM. Titles and transcripts remain
 // inside extension-origin frames, sharing the existing extension database.
-export function mountChatGPTHistory(ctx: ContentScriptContext) {
+export function mountPageHistory(
+  ctx: ContentScriptContext,
+  platform: HistoryPlatform,
+) {
   let locale: Locale = "en";
   const scope = crypto.randomUUID();
   const extensionOrigin = browser.runtime.getURL("/").replace(/\/$/, "");
@@ -30,24 +34,31 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
   let lastTheme = "";
   let readerLayout = "";
   let route = location.pathname + location.search;
+  let sidebar: HTMLElement | undefined;
+  const excludedRoute = () =>
+    /^\/(share|public|auth|login)(\/|$)/.test(location.pathname);
   const readingStyle = document.createElement("style");
   readingStyle.textContent =
     "html[data-keeptemp-reading] #keeptemp-status,html[data-keeptemp-reading] #keeptemp-generic-status{visibility:hidden!important}";
   document.documentElement.append(readingStyle);
 
-  const theme = () =>
-    document.documentElement.classList.contains("dark") ||
-    document.documentElement.dataset.theme === "dark" ||
-    getComputedStyle(document.documentElement).colorScheme === "dark" ||
-    (!document.documentElement.classList.contains("light") &&
-      matchMedia("(prefers-color-scheme: dark)").matches)
+  const theme = () => {
+    const root = document.documentElement;
+    const explicit = root.dataset.theme ?? root.dataset.mode;
+    if (explicit === "light" || explicit === "dark") return explicit;
+    if (root.classList.contains("dark")) return "dark";
+    if (root.classList.contains("light")) return "light";
+    const scheme = getComputedStyle(root).colorScheme;
+    if (scheme === "light" || scheme === "dark") return scheme;
+    return matchMedia("(prefers-color-scheme: dark)").matches
       ? "dark"
       : "light";
+  };
   const frame = (surface: "list" | "reader" | "menu") => {
     const f = document.createElement("iframe");
     f.title = `KeepTemp · ${translate(surface === "menu" ? "Conversation actions" : surface === "list" ? "Local history" : "Saved conversation", locale)}`;
     f.allow = "clipboard-write";
-    f.src = `${browser.runtime.getURL("/sidepanel.html")}?surface=${surface}&scope=${scope}&theme=${theme()}`;
+    f.src = `${browser.runtime.getURL("/sidepanel.html")}?surface=${surface}&scope=${scope}&platform=${platform.id}&theme=${theme()}`;
     f.addEventListener("load", () => syncTheme());
     return f;
   };
@@ -110,7 +121,7 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
     const rect = main?.getBoundingClientRect();
     const left = Math.max(
       0,
-      rect?.left ?? host.closest("nav")?.getBoundingClientRect().right ?? 0,
+      rect?.left ?? sidebar?.getBoundingClientRect().right ?? 0,
     );
     const layout = `${left}:${innerWidth}:${theme()}`;
     if (readerLayout !== layout) {
@@ -130,7 +141,7 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
   }
   function open() {
     mount();
-    if (/^\/(share|auth|login)(\/|$)/.test(location.pathname)) return false;
+    if (excludedRoute()) return false;
     // A collapsed or changed native sidebar must not make the toolbar a dead end.
     if (!host.isConnected || host.getBoundingClientRect().width < 80) {
       host.dataset.floating = "";
@@ -160,20 +171,59 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
   };
   function mount() {
     if (disposed) return;
-    if (/^\/(share|auth|login)(\/|$)/.test(location.pathname)) {
+    if (excludedRoute()) {
       host.remove();
       closeReader();
       return;
     }
-    const scroll = document.querySelector<HTMLElement>(
-      "[data-app-action-sidebar-scroll]",
-    );
-    const nav =
+    const scroll =
+      platform.id === "chatgpt"
+        ? document.querySelector<HTMLElement>(
+            "[data-app-action-sidebar-scroll]",
+          )
+        : null;
+    const candidates =
+      platform.id === "chatgpt"
+        ? [
+            ...document.querySelectorAll<HTMLElement>(
+              'nav[aria-label="Chat history"],nav[aria-label="聊天历史"],nav',
+            ),
+          ]
+        : [
+            ...document.querySelectorAll<HTMLElement>(
+              'aside.dframe-sidebar,aside[aria-label="Sidebar"],[data-testid="sidebar"],nav[aria-label*="sidebar" i],aside,nav',
+            ),
+          ];
+    sidebar =
       scroll?.closest("nav") ??
-      document.querySelector<HTMLElement>(
-        'nav[aria-label="Chat history"],nav[aria-label="聊天历史"],nav',
-      );
-    const target = scroll ?? nav;
+      candidates.find((el) => {
+        const rect = el.getBoundingClientRect();
+        return (
+          !el.closest('main,[role="main"]') &&
+          !el.closest('[aria-hidden="true"],[inert]') &&
+          rect.width >= 160 &&
+          rect.width <= 480 &&
+          rect.right > 0 &&
+          rect.left < innerWidth &&
+          rect.height > 100 &&
+          getComputedStyle(el).visibility !== "hidden" &&
+          (platform.id === "chatgpt" ||
+            el.matches(
+              'aside.dframe-sidebar,aside[aria-label="Sidebar"],[data-testid="sidebar"]',
+            ) ||
+            Boolean(
+              el.querySelector(
+                'a[href="/new"],a[href="/recents"],a[href^="/chat/"]',
+              ),
+            ))
+        );
+      });
+    const group =
+      platform.id === "claude"
+        ? sidebar?.querySelector<HTMLElement>("[data-sidebar-group-label]")
+        : null;
+    const before = group && !group.closest("a,button") ? group : null;
+    const target = scroll ?? before?.parentElement ?? sidebar;
     if (
       target &&
       target.getBoundingClientRect().width > 80 &&
@@ -181,7 +231,8 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
     ) {
       delete host.dataset.floating;
       host.style.cssText = "padding:4px 8px;flex-shrink:0;min-width:0";
-      target.prepend(host);
+      if (before) target.insertBefore(host, before);
+      else target.prepend(host);
     }
   }
   const observer = new MutationObserver(mount);
@@ -216,7 +267,10 @@ export function mountChatGPTHistory(ctx: ContentScriptContext) {
   });
   ctx.addEventListener(document, "click", (event) => {
     if (event.composedPath().includes(host)) return;
-    if (event.target instanceof Element && event.target.closest("nav a[href]"))
+    if (
+      event.target instanceof Element &&
+      sidebar?.contains(event.target.closest("a[href]"))
+    )
       closeReader();
   });
   ctx.addEventListener(window, "resize", positionReader);

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chineseUI, launchExtension } from "./launch";
-import { shell, turn } from "../fixtures";
+import { shell, turn, providerFixture } from "../fixtures";
 import { context as continuation } from "../../src/recovery";
 import type { Session } from "../../src/model";
 
@@ -68,6 +68,39 @@ async function seed(records: Session[] = [sample()], automatic = false) {
     { records, automatic },
   );
 }
+function claudePage(temporary = true) {
+  const sidebar =
+    '<aside class="dframe-sidebar" aria-label="Sidebar"><a href="/new">New chat</a><div data-testid="recent-chats"><div data-sidebar-group-label>Recents</div><a href="/chat/native-ordinary">Existing synthetic chat</a></div></aside>';
+  let html = providerFixture("claude")
+    .html.replace("合成问题", "Help me prepare an honest project introduction.")
+    .replace(
+      "合成回复",
+      "Focus on the Python data cleaning and charts you completed.",
+    )
+    .replace("保留第二段", "Keep your actual contribution clear.")
+    .replace(
+      "<body>",
+      `<body><style>html,body{margin:0;font:14px system-ui;background:#fff;color:#171717}html.dark,html.dark body,html[data-mode=dark],html[data-mode=dark] body{background:#212121;color:#eee}aside,nav{position:fixed;left:0;top:0;width:280px;height:100vh;background:#f9f9f9;overflow:auto}html.dark aside,html.dark nav,html[data-mode=dark] aside,html[data-mode=dark] nav{background:#171717}aside>a,nav>a,[data-sidebar-group-label],[data-testid=recent-chats]>a{display:block;padding:14px;color:inherit;text-decoration:none}body>header,main{margin-left:280px;padding:24px;box-sizing:border-box}main{min-height:calc(100vh - 80px)}main>div{max-width:720px;margin:24px auto}#composer{position:fixed;bottom:20px;left:340px;width:50%;padding:16px}</style>${sidebar}`,
+    )
+    .replace(
+      "</main>",
+      '<form><textarea id="composer" placeholder="Reply to Claude"></textarea></form></main>',
+    );
+  if (!temporary)
+    html = html.replace(
+      "<header><span>Incognito chat</span></header>",
+      "<header><span>New chat</span></header>",
+    );
+  return html;
+}
+async function claudeChat() {
+  const p = await browser.newPage();
+  await p.goto("https://claude.ai/chat/synthetic");
+  await p
+    .getByRole("button", { name: /^(Local history|本机历史) · KeepTemp$/ })
+    .click();
+  return p;
+}
 async function records() {
   return admin.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve) => {
@@ -110,6 +143,18 @@ test.beforeEach(async () => {
       headers: { "Permissions-Policy": "clipboard-write=(self)" },
     }),
   );
+  await browser.route("https://claude.ai/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: claudePage(),
+      headers: {
+        "Permissions-Policy": "clipboard-write=(self)",
+        "Content-Security-Policy":
+          "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'none'",
+      },
+    }),
+  );
   admin = await browser.newPage();
   await admin.goto(`${base}/sidepanel.html`);
   if (!test.info().title.startsWith("English")) await chineseUI(admin);
@@ -138,6 +183,7 @@ test.afterEach(async () => {
   });
   await admin.close();
   await browser.unroute("https://chatgpt.com/**");
+  await browser.unroute("https://claude.ai/**");
 });
 test.afterAll(async () => {
   await browser?.close();
@@ -175,8 +221,17 @@ test("first-use consent gates capture; streaming updates one local transcript", 
 });
 
 test("local library reuses existing data without exposing contents in website DOM", async () => {
-  await seed([sample(), sample("claude-record", "claude")]);
+  await seed([
+    sample(),
+    { ...sample("claude-record", "claude"), title: "Claude synthetic notes" },
+  ]);
   const p = await chat();
+  await expect(
+    list(p).getByRole("button", {
+      name: "Claude synthetic notes",
+      exact: true,
+    }),
+  ).toBeVisible();
   await list(p)
     .getByRole("button", { name: "合成面试准备", exact: true })
     .click();
@@ -396,25 +451,30 @@ test("theme follows ChatGPT and layout stays inside the available main area", as
   await expect(list(p).locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
-test("clear all removes every platform's text and authorization without resurrection", async () => {
-  await seed([sample(), sample("claude-record", "claude")], true);
-  const p = await chat();
-  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
-    "Saved",
-  );
-  await list(p).locator("summary", { hasText: "仅本机" }).click();
-  await list(p)
-    .getByRole("button", { name: "清空 KeepTemp 全部本机数据" })
-    .click();
-  await list(p).getByRole("button", { name: "确认清空" }).click();
-  await expect(
-    list(p).getByRole("button", { name: "Agree and enable local recording" }),
-  ).toBeVisible();
-  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
-    "Not authorized",
-  );
-  expect(await records()).toEqual([]);
-});
+for (const source of ["chatgpt", "claude"] as const)
+  test(`${source} clear all removes every platform's text and authorization without resurrection`, async () => {
+    await seed([sample(), sample("claude-record", "claude")], true);
+    const p = source === "claude" ? await claudeChat() : await chat();
+    if (source === "claude")
+      await list(p)
+        .getByRole("button", { name: "开启临时自动记录", exact: true })
+        .click();
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText("Saved");
+    await list(p).locator("summary", { hasText: "仅本机" }).click();
+    await list(p)
+      .getByRole("button", { name: "清空 KeepTemp 全部本机数据" })
+      .click();
+    await list(p).getByRole("button", { name: "确认清空" }).click();
+    await expect(
+      list(p).getByRole("button", { name: "Agree and enable local recording" }),
+    ).toBeVisible();
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText("Not authorized");
+    expect(await records()).toEqual([]);
+  });
 
 test("toolbar opens a fallback when the native sidebar disappears; reinjection stays unique", async () => {
   await seed();
@@ -488,45 +548,46 @@ test("toolbar opens a fallback when the native sidebar disappears; reinjection s
   await cdp.detach();
 });
 
-test("embedded record reports a worker storage failure without a false success", async () => {
-  await seed([]);
-  const p = await chat();
-  const worker = browser.serviceWorkers()[0]!;
-  await worker.evaluate(() => {
-    const proto = IDBObjectStore.prototype;
-    Object.defineProperty(proto, "originalPut", {
-      value: proto.put,
-      configurable: true,
+for (const source of ["chatgpt", "claude"] as const)
+  test(`${source} embedded record reports a worker storage failure without a false success`, async () => {
+    await seed([]);
+    const p = source === "claude" ? await claudeChat() : await chat();
+    const worker = browser.serviceWorkers()[0]!;
+    await worker.evaluate(() => {
+      const proto = IDBObjectStore.prototype;
+      Object.defineProperty(proto, "originalPut", {
+        value: proto.put,
+        configurable: true,
+      });
+      proto.put = function () {
+        throw new DOMException("synthetic quota", "QuotaExceededError");
+      };
     });
-    proto.put = function () {
-      throw new DOMException("synthetic quota", "QuotaExceededError");
-    };
-  });
-  try {
+    try {
+      await list(p)
+        .getByRole("button", { name: "＋ 记录当前对话", exact: true })
+        .click();
+      await expect(list(p).getByRole("status")).toContainText("暂未保存成功");
+      expect(await records()).toHaveLength(0);
+      await expect(
+        p.locator("#keeptemp-status").getByRole("status"),
+      ).not.toContainText("Saved");
+    } finally {
+      await worker.evaluate(() => {
+        const proto =
+          IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
+            originalPut?: typeof IDBObjectStore.prototype.put;
+          };
+        proto.put = proto.originalPut!;
+        delete proto.originalPut;
+      });
+    }
     await list(p)
       .getByRole("button", { name: "＋ 记录当前对话", exact: true })
       .click();
-    await expect(list(p).getByRole("status")).toContainText("暂未保存成功");
-    expect(await records()).toHaveLength(0);
-    await expect(
-      p.locator("#keeptemp-status").getByRole("status"),
-    ).not.toContainText("Saved");
-  } finally {
-    await worker.evaluate(() => {
-      const proto =
-        IDBObjectStore.prototype as typeof IDBObjectStore.prototype & {
-          originalPut?: typeof IDBObjectStore.prototype.put;
-        };
-      proto.put = proto.originalPut!;
-      delete proto.originalPut;
-    });
-  }
-  await list(p)
-    .getByRole("button", { name: "＋ 记录当前对话", exact: true })
-    .click();
-  await expect(list(p).getByRole("status")).toContainText("已存入本机历史");
-  expect(await records()).toHaveLength(1);
-});
+    await expect(list(p).getByRole("status")).toContainText("已存入本机历史");
+    expect(await records()).toHaveLength(1);
+  });
 
 test("extension history loads with a restrictive parent frame policy", async () => {
   await browser.route("https://chatgpt.com/**", (route) =>
@@ -730,4 +791,326 @@ test("English floating menu stays outside the sidebar, supports keyboard and clo
     .getByRole("button", { name: "Confirm delete", exact: true })
     .click();
   await expect.poll(records).toHaveLength(0);
+});
+
+test("English Claude consent enables only Claude and streams into one durable record", async () => {
+  const p = await claudeChat();
+  await expect(
+    list(p).getByRole("button", { name: "Agree and enable local recording" }),
+  ).toBeVisible();
+  expect(await records()).toHaveLength(0);
+  await list(p)
+    .getByRole("button", { name: "Agree and enable local recording" })
+    .click();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  await expect.poll(async () => (await records()).length).toBe(1);
+  await p.locator("[data-stream]").evaluate(async (el) => {
+    for (let i = 0; i < 15; i++) {
+      el.textContent = `Synthetic streamed answer ${i}`;
+      await new Promise((r) => setTimeout(r, 35));
+    }
+  });
+  await expect
+    .poll(async () => (await records())[0]?.messages[1]?.text)
+    .toContain("Synthetic streamed answer 14");
+  const [saved] = await records();
+  expect(saved!.source).toBe("claude");
+  expect(saved!.messages).toHaveLength(2);
+  await p.close();
+  await admin.reload();
+  await expect(admin.locator(".session")).toHaveCount(1);
+  const gpt = await browser.newPage();
+  await gpt.goto("https://chatgpt.com/?temporary-chat=true");
+  await expect(
+    gpt.locator("#keeptemp-status").getByRole("status"),
+  ).toContainText("Auto-save is off");
+  expect(await records()).toHaveLength(1);
+});
+
+test("English Claude shares the library, copies ChatGPT context exactly and returns to its existing composer", async () => {
+  const fromGpt = {
+    ...sample(),
+    title: "Internship Interview Prep",
+    messages: sample().messages.map((m, i) => ({
+      ...m,
+      text:
+        i === 0
+          ? "I am applying for a data analyst internship. I cleaned the data and made charts for a course project. How should I introduce my own contribution?"
+          : "Describe the project briefly, then focus on the Python data cleaning and charts you completed. Explain that a teammate built the prediction model. Keep the introduction honest and specific.",
+    })),
+  };
+  const fromClaude = {
+    ...sample("claude-record", "claude"),
+    title: "Research Outline",
+  };
+  await seed([fromGpt, fromClaude]);
+  const p = await claudeChat();
+  expect(await p.locator("aside #keeptemp-history-entry").count()).toBe(1);
+  await expect(
+    list(p).getByRole("button", { name: fromGpt.title, exact: true }),
+  ).toBeVisible();
+  await expect(
+    list(p).getByRole("button", { name: fromClaude.title, exact: true }),
+  ).toBeVisible();
+  await p.locator("#composer").fill("Keep my existing draft");
+  await list(p)
+    .getByRole("button", { name: fromGpt.title, exact: true })
+    .click();
+  await expect(reader(p).locator(".embedded-message > span")).toHaveText([
+    "You",
+    "ChatGPT",
+  ]);
+  await reader(p)
+    .getByRole("button", { name: "Copy & continue", exact: true })
+    .click();
+  await expect(reader(p).getByRole("status")).toContainText(
+    "Full history and continuation prompt copied",
+  );
+  await browser.grantPermissions(["clipboard-read"]);
+  await admin.bringToFront();
+  expect(await admin.evaluate(() => navigator.clipboard.readText())).toBe(
+    continuation(fromGpt, "en"),
+  );
+  await browser.clearPermissions();
+  await expect(
+    reader(p).getByRole("link", { name: "New Claude chat" }),
+  ).toHaveAttribute("href", "https://claude.ai/new");
+  await expect(
+    reader(p).getByText("Enable incognito mode on Claude before pasting."),
+  ).toBeVisible();
+  await expect(p.locator("#composer")).toHaveValue("Keep my existing draft");
+  expect((await p.locator("#keeptemp-history-reader").boundingBox())!.x).toBe(
+    280,
+  );
+  expect(await p.locator("body").innerText()).not.toContain(
+    fromGpt.messages[0]!.text,
+  );
+  await p.bringToFront();
+  await p.screenshot({
+    path: "test-results/claude-history-light.png",
+    animations: "disabled",
+  });
+  await p.emulateMedia({ colorScheme: "dark" });
+  await p.evaluate(() => (document.documentElement.dataset.mode = "light"));
+  await expect(reader(p).locator("html")).toHaveAttribute(
+    "data-theme",
+    "light",
+  );
+  await p.evaluate(() => (document.documentElement.dataset.mode = "dark"));
+  await expect(reader(p).locator("html")).toHaveAttribute("data-theme", "dark");
+  await p.screenshot({
+    path: "test-results/claude-history-dark.png",
+    animations: "disabled",
+  });
+  await reader(p)
+    .getByRole("button", { name: "Back to Claude", exact: true })
+    .click();
+  await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
+  await expect(p.locator("#composer")).toHaveValue("Keep my existing draft");
+  await list(p)
+    .getByRole("button", { name: fromClaude.title, exact: true })
+    .click();
+  await expect(reader(p).locator(".embedded-message > span")).toHaveText([
+    "You",
+    "Claude",
+  ]);
+  await p.reload();
+  await p
+    .getByRole("button", { name: "Local history · KeepTemp", exact: true })
+    .click();
+  await expect(
+    list(p).getByRole("button", { name: fromGpt.title, exact: true }),
+  ).toBeVisible();
+});
+
+test("English Claude ordinary chat records manually, updates, renames, deletes and explicitly saves again", async () => {
+  await browser.route("https://claude.ai/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: claudePage(false),
+    }),
+  );
+  await seed([]);
+  const p = await claudeChat();
+  expect(await records()).toHaveLength(0);
+  await list(p)
+    .getByRole("button", { name: "＋ Record current chat", exact: true })
+    .click();
+  await expect(list(p).getByRole("status")).toContainText(
+    "Saved to local history",
+  );
+  await p
+    .locator("[data-stream]")
+    .evaluate((el) => (el.textContent = "Updated synthetic answer"));
+  await list(p)
+    .getByRole("button", { name: "＋ Record current chat", exact: true })
+    .click();
+  await expect
+    .poll(async () => (await records())[0]?.messages[1]?.text)
+    .toContain("Updated synthetic answer");
+  expect(await records()).toHaveLength(1);
+  await list(p)
+    .getByRole("button", { name: /^Conversation actions:/ })
+    .click();
+  const menu = p.frameLocator("#keeptemp-history-menu");
+  await menu.getByRole("menuitem", { name: "Rename", exact: true }).click();
+  await list(p)
+    .getByRole("textbox", { name: "Conversation name", exact: true })
+    .fill("My Project Introduction");
+  await list(p).getByRole("button", { name: "Save", exact: true }).click();
+  await expect
+    .poll(async () => (await records())[0]?.title)
+    .toBe("My Project Introduction");
+  await list(p).getByRole("searchbox").fill("Updated synthetic");
+  await list(p)
+    .getByRole("button", {
+      name: "Conversation actions: My Project Introduction",
+      exact: true,
+    })
+    .click();
+  await menu
+    .getByRole("menuitem", { name: "Delete local copy", exact: true })
+    .click();
+  await list(p)
+    .getByRole("button", { name: "Confirm delete", exact: true })
+    .click();
+  await expect.poll(records).toHaveLength(0);
+  await p
+    .locator("[data-stream]")
+    .evaluate((el) => (el.textContent = "Do not resurrect this record"));
+  await expect(
+    p.locator("#keeptemp-generic-status").getByRole("status"),
+  ).toContainText("excluded");
+  expect(await records()).toHaveLength(0);
+  await list(p)
+    .getByRole("button", { name: "＋ Record current chat", exact: true })
+    .click();
+  await expect(list(p).getByRole("status")).toContainText(
+    "Saved to local history",
+  );
+  await expect
+    .poll(async () => (await records())[0]?.messages[1]?.text)
+    .toContain("Do not resurrect this record");
+});
+
+test("English Claude supports sidebar replacements, legacy navigation, toolbar fallback and SPA closure", async () => {
+  await seed([
+    { ...sample("claude-record", "claude"), title: "Saved Claude Chat" },
+  ]);
+  const p = await claudeChat();
+  await list(p)
+    .getByRole("button", { name: "Saved Claude Chat", exact: true })
+    .click();
+  await expect(reader(p).locator("h1")).toHaveText("Saved Claude Chat");
+  await p.evaluate(() => {
+    const aside = document.querySelector("aside")!;
+    const replacement = document.createElement("nav");
+    replacement.setAttribute("aria-label", "Sidebar navigation");
+    replacement.style.cssText = aside.style.cssText;
+    replacement.innerHTML =
+      '<a href="/new">New chat</a><a href="/recents">Chats</a>';
+    aside.replaceWith(replacement);
+  });
+  await expect(p.locator("nav #keeptemp-history-entry")).toHaveCount(1);
+  await p.evaluate(() => history.pushState({}, "", "/chat/another-synthetic"));
+  await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
+  await p.locator("nav").evaluate((el) => el.remove());
+  await p.bringToFront();
+  const cdp = await browser.browser()!.newBrowserCDPSession();
+  const targets = await cdp.send("Target.getTargets", {
+    filter: [{ type: "tab" }, { exclude: true }],
+  });
+  const target = targets.targetInfos.find((t) => t.url === p.url())!;
+  await cdp.send("Extensions.triggerAction", {
+    id: new URL(base).host,
+    targetId: target.targetId,
+  });
+  await expect(p.locator("#keeptemp-history-entry[data-floating]")).toHaveCount(
+    1,
+  );
+  await expect(
+    list(p).getByRole("button", { name: "Saved Claude Chat", exact: true }),
+  ).toBeVisible();
+  await cdp.detach();
+});
+
+test("English ChatGPT and Claude tabs keep selections separate and synchronize language and deletion", async () => {
+  const fromGpt = { ...sample(), title: "Saved GPT Chat" };
+  const fromClaude = {
+    ...sample("claude-record", "claude"),
+    title: "Saved Claude Chat",
+  };
+  await seed([fromGpt, fromClaude]);
+  const gpt = await browser.newPage();
+  await gpt.goto("https://chatgpt.com/?temporary-chat=true");
+  await gpt
+    .getByRole("button", { name: "Local history · KeepTemp", exact: true })
+    .click();
+  const claude = await claudeChat();
+  await list(gpt)
+    .getByRole("button", { name: fromGpt.title, exact: true })
+    .click();
+  await list(claude)
+    .getByRole("button", { name: fromClaude.title, exact: true })
+    .click();
+  await expect(reader(gpt).locator("h1")).toHaveText(fromGpt.title);
+  await expect(reader(claude).locator("h1")).toHaveText(fromClaude.title);
+  await reader(claude)
+    .getByRole("button", { name: "中文", exact: true })
+    .click();
+  await expect(
+    reader(gpt).getByRole("button", { name: "返回 ChatGPT", exact: true }),
+  ).toBeVisible();
+  await expect(
+    reader(claude).getByRole("button", { name: "返回 Claude", exact: true }),
+  ).toBeVisible();
+  await reader(claude)
+    .getByRole("button", { name: "删除本机记录", exact: true })
+    .click();
+  await reader(claude)
+    .getByRole("button", { name: "确认删除", exact: true })
+    .click();
+  await expect(
+    list(gpt).getByRole("button", { name: fromClaude.title, exact: true }),
+  ).toHaveCount(0);
+  await expect(reader(gpt).locator("h1")).toHaveText(fromGpt.title);
+  await expect(
+    reader(claude).getByText("这条本机记录已不存在。", { exact: true }),
+  ).toBeVisible();
+});
+
+test("English Claude ignores forged page messages and removes local history on shared and login routes", async () => {
+  await seed([
+    { ...sample("claude-record", "claude"), title: "Private Synthetic Notes" },
+  ]);
+  const p = await claudeChat();
+  const entry = await p.locator("#keeptemp-history-list").getAttribute("src");
+  const scope = new URL(entry!).searchParams.get("scope");
+  await p.evaluate(
+    (scope) =>
+      window.postMessage({ type: "keeptemp:history-open", scope }, "*"),
+    scope,
+  );
+  await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
+  await list(p)
+    .getByRole("button", { name: "Private Synthetic Notes", exact: true })
+    .click();
+  await expect(reader(p).locator("h1")).toHaveText("Private Synthetic Notes");
+  for (const path of [
+    "/share/synthetic",
+    "/public/artifacts/synthetic",
+    "/login",
+  ]) {
+    await p.evaluate((path) => history.pushState({}, "", path), path);
+    await expect(p.locator("#keeptemp-history-reader")).toHaveCount(0);
+    await expect(p.locator("#keeptemp-history-entry")).toHaveCount(0);
+  }
+  await p.evaluate(() => history.pushState({}, "", "/chat/synthetic"));
+  await expect(
+    p.getByRole("button", { name: "Local history · KeepTemp", exact: true }),
+  ).toBeVisible();
+  expect(await records()).toHaveLength(1);
 });

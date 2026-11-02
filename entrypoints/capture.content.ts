@@ -1,7 +1,8 @@
 import { browser } from "wxt/browser";
 import { createPlatformAdapter } from "../src/adapters/index";
 import type { BridgeRequest, BridgeResponse } from "../src/model";
-import { mountChatGPTHistory } from "../src/chatgpt-history";
+import { mountPageHistory } from "../src/page-history";
+import { historyPlatformFromUrl } from "../src/platforms";
 import { version } from "../package.json";
 import { translate, localizeInterface, type Locale } from "../src/i18n";
 export default defineContentScript({
@@ -14,10 +15,10 @@ export default defineContentScript({
   runAt: "document_idle",
   main(ctx) {
     let locale: Locale = "en";
-    const history =
-      location.origin === "https://chatgpt.com"
-        ? mountChatGPTHistory(ctx)
-        : undefined;
+    const pagePlatform = historyPlatformFromUrl(location.href);
+    const history = pagePlatform
+      ? mountPageHistory(ctx, pagePlatform)
+      : undefined;
     const adapter = createPlatformAdapter(
       document,
       () => new URL(location.href),
