@@ -10,12 +10,7 @@ import { createRoot } from "react-dom/client";
 import { StorageRepository } from "../../src/storage";
 import { context, json, markdown, longContext } from "../../src/recovery";
 import type { Session } from "../../src/model";
-import {
-  prepareCurrentChat,
-  confirmGeneric,
-  currentChatError,
-} from "../../src/current-chat";
-import { genericReason, type GenericPreview } from "../../src/generic-preview";
+import { recordCurrentPage, currentChatError } from "../../src/current-chat";
 import "../../src/style.css";
 const repo = new StorageRepository();
 function dateLabel(value: number) {
@@ -42,7 +37,10 @@ function App() {
     [notice, setNotice] = useState(""),
     [failed, setFailed] = useState(false),
     [copied, setCopied] = useState(false);
-  const [preview, setPreview] = useState<GenericPreview | null>(null);
+  const [dark, setDark] = useState(
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const [themePreference, setThemePreference] = useState<boolean | undefined>();
   const [genericCount, setGenericCount] = useState(0);
   const [destination, setDestination] = useState<PlatformId>("chatgpt");
   const [enabledOn, setEnabledOn] = useState<PlatformId[]>([]);
@@ -81,6 +79,8 @@ function App() {
     };
   }, [menuId]);
   const listScroll = useRef(0);
+  const readEpoch = useRef(0),
+    mutationActive = useRef(false);
   const current = sessions.find((s) => s.id === selected);
   async function load() {
     const [c, e, s] = await Promise.all([
@@ -90,7 +90,8 @@ function App() {
     ]);
     const platforms = await repo.enabledPlatforms();
     const generic = await repo.genericCount();
-    return { c, e, s, platforms, generic };
+    const theme = await repo.darkMode();
+    return { c, e, s, platforms, generic, theme };
   }
   function apply(data: Awaited<ReturnType<typeof load>>) {
     setConsent(data.c);
@@ -98,13 +99,17 @@ function App() {
     setSessions(data.s);
     setEnabledOn(data.platforms);
     setGenericCount(data.generic);
+    setThemePreference(data.theme);
+    setDark(data.theme ?? matchMedia("(prefers-color-scheme: dark)").matches);
   }
   useEffect(() => {
     let active = true;
     const refresh = async () => {
+      if (mutationActive.current) return;
+      const epoch = ++readEpoch.current;
       try {
         const data = await load();
-        if (active) apply(data);
+        if (active && epoch === readEpoch.current) apply(data);
       } catch {
         if (active) {
           setFailed(true);
@@ -119,6 +124,17 @@ function App() {
       clearInterval(timer);
     };
   }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }, [dark]);
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const change = () => {
+      if (themePreference === undefined) setDark(media.matches);
+    };
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, [themePreference]);
   useEffect(() => {
     if (!notice || failed) return;
     const timer = setTimeout(() => setNotice(""), 3500);
@@ -144,8 +160,11 @@ function App() {
       | string
       | ((error: unknown) => string) = "操作未完成，请检查本地存储空间后重试。",
   ) {
+    if (mutationActive.current) return;
     setBusy(true);
     setNotice("");
+    mutationActive.current = true;
+    readEpoch.current++;
     try {
       const result = await task();
       apply(await load());
@@ -155,6 +174,7 @@ function App() {
       setFailed(true);
       setNotice(typeof failure === "function" ? failure(error) : failure);
     } finally {
+      mutationActive.current = false;
       setBusy(false);
     }
   }
@@ -205,9 +225,45 @@ function App() {
         >
           ▱ <strong>KeepTemp</strong>
         </button>
-        <span className="badge">
-          <span aria-hidden="true">●</span> 仅存本机
-        </span>
+        <div className="header-actions">
+          <span className="badge">
+            <span aria-hidden="true">●</span> 仅存本机
+          </span>
+          <button
+            className="theme-toggle"
+            aria-label={dark ? "切换为浅色" : "切换为深色"}
+            title={dark ? "切换为浅色" : "切换为深色"}
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                await repo.setDarkMode(!dark);
+                setDark(!dark);
+                setThemePreference(!dark);
+              })
+            }
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {dark ? (
+                <>
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" />
+                </>
+              ) : (
+                <path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z" />
+              )}
+            </svg>
+          </button>
+        </div>
       </header>
       {notice && (
         <div className="toast" data-tone={failed ? "error" : "success"}>
@@ -221,7 +277,6 @@ function App() {
         <p>正在打开本地记录…</p>
       ) : !consent ? (
         <section className="welcome">
-          <span className="eyebrow">A LITTLE LESS TEMPORARY</span>
           <h1>
             临时对话，
             <br />
@@ -234,20 +289,11 @@ function App() {
           </p>
           <div className="card">
             <h3>开始之前</h3>
+            <p>对话文字只保存在这台设备，不上传，不需要账号或 API Key。</p>
             <p>
-              临时聊天自动保存支持
-              ChatGPT、Claude、Grok、Gemini。后三者为实验支持。其他 HTTPS
-              聊天网页可尝试通用识别，预览确认后只记录当前对话；这不会改变网站里的历史。不上传，不需要账号或
-              API Key。
+              本地保存不改变网站的历史或数据保留规则。数据库未加密；卸载扩展或清理浏览器可能丢失记录，请按需导出。
             </p>
-            <p>
-              本地数据库未加密，不是密码保险库。卸载扩展或清理浏览器数据可能丢失记录，请按需导出。
-            </p>
-            <p>
-              本地保存不改变平台端保留规则；OpenAI
-              可能为安全目的保留临时聊天最多 30
-              天。复制接续不恢复原服务端会话、附件或工具状态。
-            </p>
+            <p>接续保留文字背景，不恢复附件、工具或原服务端状态。</p>
           </div>
           <button
             className="primary full"
@@ -256,7 +302,7 @@ function App() {
           >
             我了解并同意本地保存
           </button>
-          <small>同意后，再开启自动保存。</small>
+          <small>同意后，点击记录当前对话即可开始。</small>
         </section>
       ) : current ? (
         <section className="conversation-view">
@@ -277,11 +323,6 @@ function App() {
             {current.messages.length} 条消息
             {current.excluded ? " · 已停止保存" : ""}
           </div>
-          {current.captureMode === "explicit" && (
-            <p className="notice">
-              这是你主动记录的网页对话。网站里的历史可能仍存在，本地保存不提供网站端隐私隔离。
-            </p>
-          )}
           <h1>{current.title}</h1>
           <div className="toolbar">
             <button
@@ -372,7 +413,6 @@ function App() {
         <section>
           <div className="shelf-heading">
             <div>
-              <span className="eyebrow">KEEP WHAT MATTERS</span>
               <h1>你的对话</h1>
             </div>
             <span className="count">{sessions.length} 段</span>
@@ -404,18 +444,18 @@ function App() {
             </button>
           </div>
           <button
-            className="record-current"
+            className="record-current primary"
             disabled={busy}
             onClick={() =>
               run(
                 async () => {
-                  const result = await prepareCurrentChat(repo);
-                  setPreview(result);
-                  return result
-                    ? ""
-                    : "已保存当前可读取的内容，后续将自动记录。";
+                  await recordCurrentPage(repo);
+                  setQuery("");
+                  setSelected(null);
+                  listScroll.current = 0;
+                  window.scrollTo(0, 0);
                 },
-                "",
+                "已保存，后续将自动记录。",
                 currentChatError,
               )
             }
@@ -425,63 +465,6 @@ function App() {
           <small className="record-hint">
             已经聊到一半？保存现有可读文字，并继续记录。
           </small>
-          {preview && (
-            <section className="capture-preview" aria-label="保存前预览">
-              <div className="preview-heading">
-                <h3>保存前预览</h3>
-                <button aria-label="关闭预览" onClick={() => setPreview(null)}>
-                  ×
-                </button>
-              </div>
-              <small>
-                {new URL(preview.origin).hostname} ·{" "}
-                {preview.reason === "ready"
-                  ? `${preview.messages.length} 条消息`
-                  : "尚未完成识别"}{" "}
-                · 通用识别（实验）
-              </small>
-              <p className="notice">
-                KeepTemp
-                只在本机另存一份，网站里的历史可能仍存在。请先核对消息角色和文字；确认后只持续记录这一段对话。
-              </p>
-              {preview.method === "deepseek-layout" && (
-                <small>
-                  DeepSeek
-                  采用实验性页面规则，尚待真实账号验证；不代表已开启临时模式。
-                </small>
-              )}
-              {preview.reason !== "ready" ? (
-                <p role="status">{genericReason(preview.reason)}</p>
-              ) : (
-                <>
-                  <div className="preview-messages">
-                    {preview.messages.map((m) => (
-                      <article key={m.id}>
-                        <strong>{m.role === "user" ? "你" : "AI"}</strong>
-                        <p>{m.text}</p>
-                      </article>
-                    ))}
-                  </div>
-                  <button
-                    className="primary full"
-                    disabled={busy}
-                    onClick={() =>
-                      run(
-                        async () => {
-                          await confirmGeneric(preview);
-                          setPreview(null);
-                        },
-                        "已保存当前可读取的内容，后续将自动记录。",
-                        currentChatError,
-                      )
-                    }
-                  >
-                    确认并记录此对话
-                  </button>
-                </>
-              )}
-            </section>
-          )}
           <div className="new-chat-row">
             <select
               className="platform-select"
@@ -498,7 +481,7 @@ function App() {
               ))}
             </select>
             <a
-              className="primary new-chat"
+              className="button new-chat"
               href={target.url}
               target="_blank"
               rel="noreferrer"
@@ -685,11 +668,11 @@ function App() {
             ) : (
               <div className="empty">
                 <div className="empty-icon">▱</div>
-                <h3>{query ? "没有找到相关对话" : "下一段好对话，留在这里"}</h3>
+                <h3>{query ? "没有找到相关对话" : "还没有保存的对话"}</h3>
                 <p>
                   {query
                     ? "换个关键词试试，标题和正文都可以搜。"
-                    : "开启自动保存，开始临时聊天。保存成功后会自动出现在这里。"}
+                    : "在聊天网页点击记录当前对话，保存成功后会出现在这里。"}
                 </p>
                 {query && (
                   <button className="link" onClick={() => setQuery("")}>
@@ -704,7 +687,7 @@ function App() {
             <p className="settings-note">
               记录只在此浏览器中保存，没有云同步。Claude、Grok、Gemini
               为实验适配，通用／DeepSeek
-              也尚待真实账号验收。已确认的通用网页可在刷新后重新加载脚本；清空会撤回本地保存授权，Chrome
+              也尚待真实账号验收。点击记录后会持续保存当前会话；清空会撤回本地保存授权，Chrome
               网站访问权限可在扩展设置另行撤回。数据库未加密，卸载扩展可能丢失数据。请在对话内导出需要备份的记录。
             </p>
             <button
@@ -720,7 +703,6 @@ function App() {
                     await repo.reset();
                     setSelected(null);
                     setQuery("");
-                    setPreview(null);
                   }, "全部本地记录与授权已清空");
               }}
             >

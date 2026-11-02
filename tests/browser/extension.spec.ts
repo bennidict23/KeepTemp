@@ -419,9 +419,7 @@ test("starts recording a conversation opened independently and already in progre
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText(
-    "已保存当前可读取的内容",
-  );
+  await expect(panel.getByRole("status")).toContainText("已保存");
   await expect(panel.locator(".session")).toHaveCount(1);
   await expect(panel.locator(".session")).toContainText("4 条消息");
   await expect(
@@ -435,9 +433,7 @@ test("starts recording a conversation opened independently and already in progre
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText(
-    "已保存当前可读取的内容",
-  );
+  await expect(panel.getByRole("status")).toContainText("已保存");
   await expect(panel.locator(".session")).toHaveCount(1);
   await expect(panel.locator(".session")).toContainText("4 条消息");
   expect(await p.locator("#keeptemp-status").count()).toBe(1);
@@ -487,9 +483,7 @@ test("hot-attaches when the old content script is absent without reloading the c
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText(
-    "已保存当前可读取的内容",
-  );
+  await expect(panel.getByRole("status")).toContainText("已保存");
   await expect(panel.locator(".session")).toHaveCount(1);
   await expect(panel.locator(".session strong")).toContainText(
     "existing synthetic chat, do not reload",
@@ -643,9 +637,7 @@ test("recording the current Claude chat only enables Claude and preserves the ex
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("status")).toContainText(
-    "已保存当前可读取的内容",
-  );
+  await expect(panel.getByRole("status")).toContainText("已保存");
   await expect(panel.locator(".session")).toHaveCount(1);
   await expect(panel.locator(".capture-strip small")).toHaveText(
     "Claude 已启用",
@@ -676,36 +668,23 @@ async function genericChat(
   await p.goto(origin + routePath);
   return p;
 }
-async function previewPage(p: Page) {
+async function recordPage(p: Page, statusId = "#keeptemp-status") {
   await p.bringToFront();
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toBeVisible();
-}
-async function confirmPage(p: Page) {
-  await p.bringToFront();
-  await panel
-    .getByRole("button", { name: "确认并记录此对话", exact: true })
-    .click();
-  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
-    "Saved",
+  await expect(p.locator(statusId).getByRole("status")).toContainText("Saved");
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toHaveCount(
+    0,
   );
+  await expect(
+    panel.getByRole("button", { name: "确认并记录此对话" }),
+  ).toHaveCount(0);
 }
-test("generic preview is memory-only; explicit confirmation streams and resumes the same chat after reload", async () => {
+test("one record click saves a generic chat, streams updates and resumes after reload", async () => {
   const p = await genericChat();
-  await previewPage(p);
-  await expect(panel.locator(".preview-messages article")).toHaveCount(2);
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
-    "网站里的历史可能仍存在",
-  );
   await expect(panel.locator(".session")).toHaveCount(0);
-  await panel.getByRole("button", { name: "关闭预览" }).click();
-  await expect(panel.locator(".session")).toHaveCount(0);
-  await previewPage(p);
-  await panel.setViewportSize({ width: 340, height: 900 });
-  await panel.screenshot({ path: "docs/generic-preview.png", fullPage: true });
-  await confirmPage(p);
+  await recordPage(p);
   await expect(panel.locator(".session")).toHaveCount(1);
   await expect(panel.locator(".session")).toContainText(
     "synthetic-chat.example",
@@ -720,65 +699,49 @@ test("generic preview is memory-only; explicit confirmation streams and resumes 
   await expect(panel.locator(".messages article")).toHaveCount(2);
   await expect(panel.locator(".messages")).toContainText("通用流式 29");
   await expect(
-    panel.getByText("这是你主动记录的网页对话。", { exact: false }),
-  ).toBeVisible();
+    panel.getByText("网站里的历史可能仍存在", { exact: false }),
+  ).toHaveCount(0);
   await p.reload();
   await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
     "Saved",
   );
-  await expect(panel.locator(".messages article")).toHaveCount(2);
   await p.evaluate(
     () => (document.querySelector("[data-stream]")!.textContent = "刷新后继续"),
   );
   await expect(panel.locator(".messages")).toContainText("刷新后继续");
+  await expect(panel.locator(".messages article")).toHaveCount(2);
   await p.close();
   await panel.reload();
   await expect(panel.locator(".session")).toHaveCount(1);
 });
-
-test("generic SPA navigation invalidates previews and requires fresh approval for a new conversation", async () => {
+test("SPA navigation stops automatic capture of another generic conversation until a record click", async () => {
   const p = await genericChat();
-  await previewPage(p);
-  await p.evaluate(() => history.pushState(null, "", "/chat/second"));
-  await p.bringToFront();
-  await panel
-    .getByRole("button", { name: "确认并记录此对话", exact: true })
-    .click();
-  await expect(panel.getByRole("status")).toContainText("预览已失效");
-  await expect(panel.locator(".session")).toHaveCount(0);
-  await previewPage(p);
-  await confirmPage(p);
+  await recordPage(p);
   await expect(panel.locator(".session")).toHaveCount(1);
   await p.evaluate(
     (html) => {
-      history.pushState(null, "", "/chat/third");
+      history.pushState(null, "", "/chat/second");
       document.querySelector("main")!.innerHTML = html;
     },
-    '<section data-conversation-id="third">' +
-      genericTurn("third", "新的合成问题", "新的合成回答") +
+    '<section data-conversation-id="second">' +
+      genericTurn("second", "新的合成问题", "新的合成回答") +
       "</section>",
   );
   await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
     "已切换会话",
   );
   await expect(panel.locator(".session")).toHaveCount(1);
-  await previewPage(p);
-  await confirmPage(p);
+  await recordPage(p);
   await expect(panel.locator(".session")).toHaveCount(2);
 });
-
-test("generic origin and tab scopes stay independent, and deleted records cannot come back", async () => {
+test("generic origins and tabs stay independent, deletion and clear cannot be undone", async () => {
   const first = await genericChat();
-  await previewPage(first);
-  await confirmPage(first);
+  await recordPage(first);
   const second = await genericChat("https://synthetic-other.example");
-  await previewPage(second);
-  await confirmPage(second);
-  await expect(panel.locator(".session")).toHaveCount(2);
+  await recordPage(second);
   const third = await browser.newPage();
   await third.goto("https://synthetic-other.example/chat/first");
-  await previewPage(third);
-  await confirmPage(third);
+  await recordPage(third);
   await expect(panel.locator(".session")).toHaveCount(3);
   await panel
     .locator(".session")
@@ -793,7 +756,7 @@ test("generic origin and tab scopes stay independent, and deleted records cannot
   await first.evaluate(
     () =>
       (document.querySelector("[data-stream]")!.textContent =
-        "deleted text must not resurrect"),
+        "must not return"),
   );
   await clear();
   await expect(
@@ -804,10 +767,8 @@ test("generic origin and tab scopes stay independent, and deleted records cannot
     panel.getByRole("button", { name: "我了解并同意本地保存" }),
   ).toBeVisible();
 });
-
-test("generic write failure does not claim Saved or leave an automatic grant", async () => {
+test("one-click generic write failure is honest, atomic and retryable", async () => {
   const p = await genericChat();
-  await previewPage(p);
   const worker = browser.serviceWorkers()[0]!;
   await worker.evaluate(() => {
     const proto =
@@ -824,7 +785,7 @@ test("generic write failure does not claim Saved or leave an automatic grant", a
   try {
     await p.bringToFront();
     await panel
-      .getByRole("button", { name: "确认并记录此对话", exact: true })
+      .getByRole("button", { name: "记录当前对话", exact: true })
       .click();
     await expect(panel.getByRole("status")).toContainText("暂未保存成功");
     await expect(
@@ -844,26 +805,19 @@ test("generic write failure does not claim Saved or leave an automatic grant", a
       delete proto.originalPut;
     });
   }
-  await confirmPage(p);
+  await recordPage(p);
   await expect(panel.locator(".session")).toHaveCount(1);
 });
-
-test("DeepSeek synthetic native items can be explicitly recorded without claiming temporary privacy", async () => {
+test("DeepSeek legacy DOM saves in one click without asking for temporary mode or review", async () => {
   const p = await genericChat(
     "https://chat.deepseek.com",
     deepseekFixture(),
     "/a/chat/s/synthetic-deepseek",
   );
-  await previewPage(p);
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
-    "不代表已开启临时模式",
-  );
-  await expect(panel.locator(".session")).toHaveCount(0);
-  await confirmPage(p);
+  await recordPage(p);
   await panel.locator(".session").click();
   await expect(panel.locator(".meta")).toContainText("chat.deepseek.com");
   await expect(panel.locator(".messages article")).toHaveCount(2);
-  await expect(panel.locator(".messages")).toContainText("DeepSeek 合成回复");
   await p.evaluate(
     () =>
       (document.querySelector("[data-stream]")!.textContent =
@@ -871,13 +825,12 @@ test("DeepSeek synthetic native items can be explicitly recorded without claimin
   );
   await expect(panel.locator(".messages")).toContainText("DeepSeek 增量回复");
   await panel.getByRole("button", { name: "复制并接续" }).click();
-  const copied = await panel.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toContain("[assistant]\nDeepSeek 增量回复\n保留第二段");
-  expect(copied).not.toContain("chat.deepseek.com");
+  expect(await panel.evaluate(() => navigator.clipboard.readText())).toContain(
+    "[assistant]\nDeepSeek 增量回复\n保留第二段",
+  );
 });
-
 for (const source of ["chatgpt", ...otherProviders] as const) {
-  test(`${source}: manual recording previews normal/unknown mode instead of blocking it`, async () => {
+  test(`${source}: ordinary or unknown mode records directly with no preview or repeated warning`, async () => {
     const fixture =
       source === "chatgpt"
         ? {
@@ -898,32 +851,13 @@ for (const source of ["chatgpt", ...otherProviders] as const) {
     if (source === "grok") await enable();
     const p = await browser.newPage();
     await p.goto(fixture.url);
-    if (source === "grok")
-      await expect(
-        p.locator("#keeptemp-status").getByRole("status"),
-      ).toContainText("普通聊天，不保存");
-    await previewPage(p);
-    await expect(panel.locator(".preview-messages article")).toHaveCount(2);
-    await expect(panel.locator(".session")).toHaveCount(0);
-    await p.bringToFront();
-    await panel
-      .getByRole("button", { name: "确认并记录此对话", exact: true })
-      .click();
-    await expect(
-      p.locator("#keeptemp-generic-status").getByRole("status"),
-    ).toContainText("Saved");
+    await recordPage(p, "#keeptemp-generic-status");
     await expect(panel.locator(".session")).toHaveCount(1);
     await panel.locator(".session").click();
     await expect(panel.locator(".messages article")).toHaveCount(2);
     await expect(
       panel.getByText("这是你主动记录的网页对话。", { exact: false }),
-    ).toBeVisible();
-    if (source === "grok")
-      await p.evaluate(() =>
-        document
-          .querySelector("header button")!
-          .setAttribute("aria-pressed", "true"),
-      );
+    ).toHaveCount(0);
     await p.reload();
     await expect(
       p.locator("#keeptemp-generic-status").getByRole("status"),
@@ -933,35 +867,25 @@ for (const source of ["chatgpt", ...otherProviders] as const) {
     await expect(panel.locator(".session")).toHaveCount(1);
   });
 }
-
-test("DeepSeek div virtual list previews, streams and persists the full answer without thinking text", async () => {
+test("DeepSeek virtual list saves the full reply once and keeps streaming without thinking text", async () => {
   const p = await genericChat(
     "https://chat.deepseek.com",
     deepseekVirtualFixture(),
     "/a/chat/s/synthetic-virtual",
   );
-  expect(await p.locator('main,[role="main"]').count()).toBe(0);
-  await previewPage(p);
-  await expect(panel.locator(".preview-messages article")).toHaveCount(2);
-  await expect(panel.locator(".preview-messages")).toContainText("保留第二段");
-  await expect(panel.locator(".preview-messages")).not.toContainText(
-    "合成思考",
-  );
-  await expect(panel.locator(".preview-messages")).not.toContainText(
-    "合成侧栏",
-  );
-  await confirmPage(p);
+  await recordPage(p);
   await panel.locator(".session").click();
   await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText("保留第二段");
+  await expect(panel.locator(".messages")).not.toContainText("合成思考");
   await p.evaluate(async () => {
     for (let i = 0; i < 25; i++) {
       document.querySelector("[data-stream]")!.textContent =
         "虚拟列表回复 " + i;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((r) => setTimeout(r, 25));
     }
   });
   await expect(panel.locator(".messages")).toContainText("虚拟列表回复 24");
-  await expect(panel.locator(".messages article")).toHaveCount(2);
   await panel.getByRole("button", { name: "复制并接续" }).click();
   const copied = await panel.evaluate(() => navigator.clipboard.readText());
   expect(copied).toContain("[assistant]\n虚拟列表回复 24\n\n保留第二段");
@@ -975,22 +899,207 @@ test("DeepSeek div virtual list previews, streams and persists the full answer w
   await panel.reload();
   await expect(panel.locator(".session")).toHaveCount(1);
 });
-
-test("DeepSeek missing-region failure is distinct and never presents zero as a finished extraction", async () => {
+test("unrecognized DeepSeek layout shows a direct error and never saves or opens a confirmation screen", async () => {
   const p = await genericChat(
     "https://chat.deepseek.com",
     '<html><head><meta charset="UTF-8"></head><body><div class="ds-message">合成布局，不含对话区域</div></body></html>',
     "/a/chat/s/synthetic-missing",
   );
-  await previewPage(p);
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
-    "尚未完成识别",
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前对话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText("没定位到对话区域");
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toHaveCount(
+    0,
   );
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
-    "没定位到对话区域",
-  );
-  await expect(
-    panel.getByRole("button", { name: "确认并记录此对话" }),
-  ).toHaveCount(0);
   await expect(panel.locator(".session")).toHaveCount(0);
+});
+
+for (const kind of ["chatgpt", "generic"] as const) {
+  test(`${kind}: repeated manual recording appends new turns to one visible record even after automatic capture is disabled`, async () => {
+    const p = kind === "chatgpt" ? await chat() : await genericChat();
+    await recordPage(p);
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.getByRole("button", { name: "关闭自动保存" }).click();
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText(kind === "chatgpt" ? "尚未授权" : "已关闭");
+    await p.evaluate(
+      ({ html, selector }) =>
+        document.querySelector(selector)!.insertAdjacentHTML("beforeend", html),
+      {
+        html:
+          kind === "chatgpt"
+            ? turn("added-turn", "新增合成问题", "新增合成回复")
+            : genericTurn("added-turn", "新增合成问题", "新增合成回复"),
+        selector:
+          kind === "chatgpt"
+            ? "[data-chatgpt-conversation-selection-target]"
+            : "[data-conversation-id]",
+      },
+    );
+    await panel.getByRole("searchbox").fill("no-match-synthetic-filter");
+    await expect(panel.locator(".session")).toHaveCount(0);
+    await recordPage(p);
+    await expect(panel.getByRole("searchbox")).toHaveValue("");
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await expect(panel.locator(".session")).toContainText("4 条消息");
+    await p.bringToFront();
+    await panel
+      .getByRole("button", { name: "记录当前对话", exact: true })
+      .evaluate((el: HTMLButtonElement) => {
+        el.click();
+        el.click();
+      });
+    await expect(
+      panel.getByRole("button", { name: "记录当前对话", exact: true }),
+    ).toBeEnabled();
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.locator(".session").click();
+    await expect(panel.locator(".messages article")).toHaveCount(4);
+    await expect(panel.locator(".messages")).toContainText("新增合成回复");
+    await panel.getByRole("button", { name: "复制并接续" }).click();
+    expect(
+      await panel.evaluate(() => navigator.clipboard.readText()),
+    ).toContain("[user]\n新增合成问题\n\n[assistant]\n新增合成回复");
+  });
+  test(`${kind}: deleting stops background writes but an explicit record click creates a real visible copy again`, async () => {
+    const p = kind === "chatgpt" ? await chat() : await genericChat();
+    await recordPage(p);
+    await panel.locator(".session").click();
+    panel.once("dialog", (d) => d.accept());
+    await panel.getByRole("button", { name: "删除会话", exact: true }).click();
+    await expect(panel.locator(".session")).toHaveCount(0);
+    await expect(
+      p.locator("#keeptemp-status").getByRole("status"),
+    ).toContainText("已排除");
+    await p.evaluate(
+      (selector) =>
+        (document.querySelector(selector)!.textContent = "删除后的新合成回复"),
+      kind === "chatgpt" ? "[data-markdown-text-style] p" : "[data-stream]",
+    );
+    await expect(panel.locator(".session")).toHaveCount(0);
+    await recordPage(p);
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await expect(panel.locator(".session strong")).not.toHaveText("");
+    await panel.reload();
+    await expect(panel.locator(".session")).toHaveCount(1);
+    await panel.locator(".session").click();
+    await expect(panel.locator(".messages article")).toHaveCount(2);
+    await expect(panel.locator(".messages")).toContainText(
+      "删除后的新合成回复",
+    );
+  });
+}
+test("DeepSeek keeps updating and manually merges an assistant-only virtual window", async () => {
+  const p = await genericChat(
+    "https://chat.deepseek.com",
+    deepseekVirtualFixture(),
+    "/a/chat/s/partial-synthetic",
+  );
+  await recordPage(p);
+  await p.evaluate(() => {
+    document.querySelector('[data-virtual-list-item-key="10"]')!.remove();
+    document.querySelector("[data-stream]")!.textContent =
+      "用户消息卸载后的回复";
+  });
+  await expect(panel.locator(".session .preview")).toContainText(
+    "用户消息卸载后的回复",
+  );
+  await recordPage(p);
+  await expect(panel.locator(".session")).toHaveCount(1);
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await expect(panel.locator(".messages")).toContainText("DeepSeek 合成问题");
+  await expect(panel.locator(".messages")).toContainText(
+    "用户消息卸载后的回复",
+  );
+});
+test("generic pause blocks automatic and manual updates, resume captures the current text", async () => {
+  const p = await genericChat();
+  await recordPage(p);
+  await menu(p);
+  await p
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "暂停记录" })
+    .click();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "已暂停",
+  );
+  await p.evaluate(
+    () =>
+      (document.querySelector("[data-stream]")!.textContent =
+        "paused synthetic edit"),
+  );
+  await p.bringToFront();
+  await panel
+    .getByRole("button", { name: "记录当前对话", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText("此会话已暂停");
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages")).not.toContainText(
+    "paused synthetic edit",
+  );
+  await menu(p);
+  await p
+    .locator("#keeptemp-status")
+    .getByRole("button", { name: "恢复记录" })
+    .click();
+  await expect(panel.locator(".messages")).toContainText(
+    "paused synthetic edit",
+  );
+});
+test("light and dark toggle is monochrome, accessible, persistent and reaches the capture widget", async () => {
+  await panel.setViewportSize({ width: 340, height: 900 });
+  await panel.emulateMedia({ colorScheme: "light" });
+  const p = await genericChat();
+  await recordPage(p);
+  const assertNeutral = async () => {
+    const colors = await panel.evaluate(() =>
+      [
+        document.documentElement,
+        document.querySelector(".record-current")!,
+        document.querySelector(".session")!,
+      ].flatMap((el) => {
+        const css = getComputedStyle(el);
+        return [css.color, css.backgroundColor];
+      }),
+    );
+    for (const color of colors) {
+      const channels = color
+        .match(/[\d.]+/g)!
+        .slice(0, 3)
+        .map(Number);
+      expect(channels[0]).toBe(channels[1]);
+      expect(channels[1]).toBe(channels[2]);
+    }
+    expect(
+      await panel.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  };
+  await assertNeutral();
+  if (await panel.getByRole("button", { name: "关闭提示" }).isVisible())
+    await panel.getByRole("button", { name: "关闭提示" }).click();
+  await panel.screenshot({ path: "docs/library-light.png", fullPage: true });
+  await panel.getByRole("button", { name: "切换为深色" }).click();
+  await expect(panel.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(p.locator("#keeptemp-status")).toHaveAttribute(
+    "data-theme",
+    "dark",
+  );
+  await assertNeutral();
+  await panel.screenshot({ path: "docs/library-dark.png", fullPage: true });
+  await panel.reload();
+  await expect(panel.getByRole("button", { name: "切换为浅色" })).toBeVisible();
+  await expect(panel.locator("html")).toHaveAttribute("data-theme", "dark");
+  await panel.getByRole("button", { name: "切换为浅色" }).click();
+  await expect(panel.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(p.locator("#keeptemp-status")).toHaveAttribute(
+    "data-theme",
+    "light",
+  );
+  await assertNeutral();
 });

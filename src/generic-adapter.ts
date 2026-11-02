@@ -207,11 +207,6 @@ export class GenericChatAdapter {
         updatedAt: now,
       });
     }
-    if (
-      !messages.some((m) => m.role === "user") ||
-      !messages.some((m) => m.role === "assistant")
-    )
-      return fail("roles-unknown");
     const route = url.pathname + url.search;
     if (route !== this.route) {
       this.anchor = "";
@@ -223,6 +218,14 @@ export class GenericChatAdapter {
       commonThread?.dataset.conversationId ??
       commonThread?.dataset.threadId;
     if (thread && thread.length > 200) return fail("identity-missing");
+    // A native conversation and stable role/message keys identify a partial
+    // virtual window even when its user turn has already been unmounted.
+    if (
+      !thread &&
+      (!messages.some((m) => m.role === "user") ||
+        !messages.some((m) => m.role === "assistant"))
+    )
+      return fail("roles-unknown");
     if (
       !thread &&
       !/[a-f0-9]{16,}|[a-f0-9]{8}-[a-f0-9-]{20,}/i.test(
@@ -232,7 +235,8 @@ export class GenericChatAdapter {
       return fail("identity-missing");
     // URL changes and non-overlapping native anchors end this approval scope.
     if (!this.anchor || !messages.some((m) => this.known.has(m.id))) {
-      this.anchor = messages.find((m) => m.role === "user")!.id;
+      this.anchor =
+        messages.find((m) => m.role === "user")?.id ?? messages[0]!.id;
       this.known.clear();
     }
     messages.forEach((m) => this.known.add(m.id));

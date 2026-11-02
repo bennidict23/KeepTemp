@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { GenericChatAdapter } from "../src/generic-adapter";
 import { StorageRepository } from "../src/storage";
 import { validSnapshot, scopedChatId } from "../src/bridge";
@@ -415,4 +415,112 @@ describe("DeepSeek layout safety", () => {
       expect(engine.inspect().snapshot?.messages).toHaveLength(2);
     },
   );
+});
+
+describe("intentional re-recording and partial virtual windows", () => {
+  it("only a manual restart replaces a deletion marker, without restoring deleted messages or title", async () => {
+    const r = new StorageRepository(crypto.randomUUID());
+    await r.authorize();
+    const initial = snap("thread:restart");
+    initial.messages[0]!.text = "old synthetic content";
+    await r.capture(initial, true);
+    await r.rename(initial.id, "old renamed title");
+    await r.delete(initial.id);
+    expect(await r.capture(initial)).toBe(false);
+    expect(await r.capture(initial, false, true)).toBe(false);
+    const fresh = {
+      ...initial,
+      messages: [
+        {
+          ...initial.messages[0]!,
+          id: "fresh",
+          text: "fresh visible content",
+          updatedAt: 100,
+        },
+      ],
+    };
+    expect(await r.capture(fresh, true, true)).toBe(true);
+    const saved = await r.get(initial.id);
+    expect(saved?.title).toBe("fresh visible content");
+    expect(saved?.messages.map((m) => m.text)).toEqual([
+      "fresh visible content",
+    ]);
+    expect(saved?.deleted).toBeUndefined();
+    expect(await r.genericAllowed(initial.id)).toBe(true);
+    await r.close();
+  });
+  it("manual restart still refuses paused or excluded records", async () => {
+    const r = new StorageRepository(crypto.randomUUID());
+    await r.authorize();
+    await r.capture(snap(), true);
+    await r.pause(snap().id, true);
+    expect(await r.capture(snap(), true, true)).toBe(false);
+    await r.pause(snap().id, false);
+    await r.exclude(snap().id);
+    expect(await r.capture(snap(), true, true)).toBe(false);
+    await r.close();
+  });
+  it("keeps updating a native DeepSeek reply after the earlier user turn is unmounted", async () => {
+    const { engine } = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic-window",
+    );
+    const first = engine.inspect().snapshot!;
+    document.querySelector('[data-virtual-list-item-key="10"]')!.remove();
+    document.querySelector("[data-stream]")!.textContent =
+      "updated while only assistant is mounted";
+    const next = engine.inspect().snapshot!;
+    expect(next.id).toBe(first.id);
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0]?.role).toBe("assistant");
+    const r = new StorageRepository(crypto.randomUUID());
+    await r.authorize();
+    await r.capture(first, true);
+    await r.capture(next);
+    expect((await r.get(first.id))?.messages).toHaveLength(2);
+    expect((await r.get(first.id))?.messages[1]?.text).toContain(
+      "updated while only assistant is mounted",
+    );
+    await r.close();
+  });
+});
+
+it("does not report a content-free thinking placeholder as a saved conversation", async () => {
+  const r = new StorageRepository(crypto.randomUUID());
+  await r.authorize();
+  const empty = snap();
+  empty.messages[0]!.text = "   ";
+  expect(await r.capture(empty, true, true)).toBe(false);
+  expect(await r.list()).toEqual([]);
+  expect(await r.genericCount()).toBe(0);
+  await r.close();
+});
+
+it("a failed manual restart leaves the deletion marker and keeps automatic writing disabled", async () => {
+  const r = new StorageRepository(crypto.randomUUID());
+  await r.authorize();
+  await r.capture(snap(), true);
+  await r.delete(snap().id);
+  const original = IDBObjectStore.prototype.put;
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, "put")
+    .mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["put"]>
+    ) {
+      if (this.name === "sessions")
+        throw new DOMException("synthetic", "QuotaExceededError");
+      return original.apply(this, args);
+    });
+  try {
+    await expect(r.capture(snap(), true, true)).rejects.toThrow(
+      "storage-write-failed",
+    );
+  } finally {
+    write.mockRestore();
+  }
+  expect((await r.get(snap().id))?.deleted).toBe(true);
+  expect(await r.genericAllowed(snap().id)).toBe(false);
+  expect(await r.capture(snap())).toBe(false);
+  await r.close();
 });

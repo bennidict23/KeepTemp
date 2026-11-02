@@ -81,38 +81,94 @@ async function toolbarAction() {
     targetId: target!.targetId,
   });
 }
-test("native toolbar action grants current-origin access and unlocks generic preview without host grants", async () => {
+
+async function inspectActivePage() {
+  return panel.evaluate(async () => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab!.id!, frameIds: [0] },
+      files: ["/content-scripts/generic.js"],
+    });
+    const result = await chrome.tabs.sendMessage(tab!.id!, {
+      type: "keeptemp:generic-preview",
+    });
+    return {
+      reason: result.preview.reason,
+      count: result.preview.messages.length,
+      origin: result.preview.origin,
+    };
+  });
+}
+test("native toolbar action grants current-origin access without persisted test host grants", async () => {
   await chat.bringToFront();
   expect(await activeUrl()).toBe(null);
   await toolbarAction();
   await expect.poll(activeUrl).toBe(chat.url());
-  await panel
-    .getByRole("button", { name: "记录当前对话", exact: true })
-    .click();
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toBeVisible();
-  await expect(panel.locator(".preview-messages article")).toHaveCount(2);
-  await expect(panel.locator(".session")).toHaveCount(0);
-  const permissions = await panel.evaluate(async () => {
-    const chrome = (
-      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
-    ).chrome;
-    return chrome.permissions.getAll();
+  expect(await inspectActivePage()).toMatchObject({
+    reason: "ready",
+    count: 2,
+    origin: "https://toolbar-chat.example",
   });
-  expect(permissions.permissions).not.toContain("tabs");
-  // activeTab is temporary access, not a grant to every site or a persisted host.
-  expect(permissions.origins ?? []).not.toContain("https://*/*");
+  await expect(panel.locator(".session")).toHaveCount(0);
 });
-test("cross-origin navigation revokes temporary access until another real toolbar action", async () => {
+test("cross-origin navigation revokes access until another native action", async () => {
   await chat.goto("https://toolbar-other.example/chat/second");
   await chat.bringToFront();
   expect(await activeUrl()).toBe(null);
   await toolbarAction();
   await expect.poll(activeUrl).toBe(chat.url());
+  expect(await inspectActivePage()).toMatchObject({
+    reason: "ready",
+    count: 2,
+    origin: "https://toolbar-other.example",
+  });
+});
+test("one record click reaches native site permission with no application confirmation or fake Saved", async () => {
+  await panel.evaluate(() => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    const original = chrome.permissions.request.bind(chrome.permissions);
+    chrome.permissions.request = (args) => {
+      document.documentElement.dataset.requestedOrigins = JSON.stringify(
+        args.origins,
+      );
+      return original(args); // Observe only; never replace Chrome's permission decision.
+    };
+  });
+  await chat.bringToFront();
   await panel
     .getByRole("button", { name: "记录当前对话", exact: true })
     .click();
-  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
-    "toolbar-other.example",
+  await expect
+    .poll(() =>
+      panel.evaluate(() => document.documentElement.dataset.requestedOrigins),
+    )
+    .toBe(JSON.stringify(["https://toolbar-other.example/*"]));
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toHaveCount(
+    0,
   );
+  await expect(
+    panel.getByRole("button", { name: "确认并记录此对话" }),
+  ).toHaveCount(0);
   await expect(panel.locator(".session")).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: "记录当前对话", exact: true }),
+  ).toBeDisabled();
+  const granted = await panel.evaluate(async () => {
+    const chrome = (
+      globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
+    ).chrome;
+    return chrome.permissions.getAll();
+  });
+  expect(granted.permissions).not.toContain("tabs");
+  expect(granted.origins).not.toContain("https://*/*");
+  // The native prompt remains pending in headless Chromium; the profile is closed
+  // after this assertion. Accepted/denied outcomes are covered by the other suites.
 });

@@ -21,6 +21,12 @@ export class StorageRepository {
       },
     });
   }
+  async darkMode() {
+    return (await this.db).get("meta", "dark-mode");
+  }
+  async setDarkMode(dark: boolean) {
+    await (await this.db).put("meta", dark, "dark-mode");
+  }
   async consent() {
     return (await this.db).get("meta", "consent").then(Boolean);
   }
@@ -78,10 +84,15 @@ export class StorageRepository {
   async get(id: string) {
     return (await this.db).get("sessions", id);
   }
-  async capture(snapshot: Snapshot, enableCapture = false) {
+  async capture(
+    snapshot: Snapshot,
+    enableCapture = false,
+    restartDeleted = false,
+  ) {
     const requestedExplicit = snapshot.captureMode === "explicit";
     if (
       !snapshot.messages.length ||
+      !snapshot.messages.some((m) => m.text.trim()) ||
       (snapshot.source === "generic" && !requestedExplicit) ||
       (!requestedExplicit && snapshot.temporary !== true)
     )
@@ -106,7 +117,10 @@ export class StorageRepository {
         return false;
       }
       const store = tx.objectStore("sessions");
-      const old = await store.get(snapshot.id);
+      let old = await store.get(snapshot.id);
+      // Only a new explicit record command may replace a deletion marker.
+      // Drop the tombstone entirely: never restore deleted title/messages/times.
+      if (old?.deleted && enableCapture && restartDeleted) old = undefined;
       if (old?.excluded || old?.deleted || old?.paused) {
         await tx.done;
         return false;
@@ -170,8 +184,10 @@ export class StorageRepository {
           old?.title ??
           (all[0]?.text.slice(0, 70) ||
             (isPlatform(snapshot.source)
-              ? `${platformName(snapshot.source)} Temporary Chat`
-              : "Synthetic chat")),
+              ? `${platformName(snapshot.source)} 对话`
+              : snapshot.source === "generic"
+                ? "未命名对话"
+                : "Synthetic chat")),
         createdAt: old?.createdAt ?? now,
         updatedAt: now,
         messages: all,

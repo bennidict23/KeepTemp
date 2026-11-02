@@ -10,6 +10,8 @@ export interface BridgeResponse {
   ok: boolean;
   consent?: boolean;
   saved?: boolean;
+  sessionId?: string;
+  theme?: "light" | "dark" | "system";
   paused?: boolean;
   excluded?: boolean;
   error?: string;

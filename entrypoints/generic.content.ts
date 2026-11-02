@@ -22,6 +22,7 @@ export default defineContentScript({
       busy = false;
     let host: HTMLDivElement | undefined;
     let initialized = false;
+    let theme: "light" | "dark" | "system" = "system";
     const say = (text: string) => {
       if (!host) {
         host = document.createElement("div");
@@ -30,8 +31,27 @@ export default defineContentScript({
           : "keeptemp-status";
         const shadow = host.attachShadow({ mode: "open" });
         shadow.innerHTML =
-          '<style>:host{position:fixed;right:18px;bottom:18px;z-index:2147483647;font:12px system-ui;color:#35533e}section{max-width:300px;padding:10px 12px;background:#f7f9f3;border:1px solid #d7e0d0;border-radius:12px;box-shadow:0 3px 14px #0001}p{margin:0;line-height:1.6}small{display:block;font-size:10px;color:#6d7868}button{font:inherit;color:inherit;background:none;border:1px solid #d7e0d0;border-radius:6px;margin-top:6px;cursor:pointer;padding:3px 8px}</style><section><p role="status"></p><small>本地副本 · 不改变网站历史</small><button id="pause" aria-label="暂停记录">暂停</button></section>';
+          '<style>:host{position:fixed;right:18px;bottom:18px;z-index:2147483647;font:12px system-ui;--bg:#ffffff;--line:#dedede;--ink:#303030;--muted:#707070;color:var(--ink)}section{max-width:300px;padding:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 3px 14px #0001}.bar{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 12px}p{margin:0;line-height:1.6;font-size:11px}#expand{border:0;padding:0 4px;font-size:18px;margin:0}#actions{padding:0 12px 10px}#actions[hidden]{display:none}small{display:block;font-size:10px;color:var(--muted)}button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:6px;margin-top:6px;cursor:pointer;padding:3px 8px}:host([data-theme=dark]){--bg:#212121;--line:#454545;--ink:#ececec;--muted:#aaaaaa}@media(prefers-color-scheme:dark){:host(:not([data-theme=light])){--bg:#212121;--line:#454545;--ink:#ececec;--muted:#aaaaaa}}</style><section><div class="bar"><p role="status"></p><button id="expand" aria-label="KeepTemp 操作" aria-expanded="false" aria-controls="actions">⋯</button></div><div id="actions" hidden><button id="pause" aria-label="暂停记录">暂停</button></div></section>';
         document.documentElement.append(host);
+        const expand = shadow.querySelector<HTMLButtonElement>("#expand")!;
+        const actions = shadow.querySelector<HTMLElement>("#actions")!;
+        const close = () => {
+          actions.hidden = true;
+          expand.setAttribute("aria-expanded", "false");
+        };
+        expand.onclick = () => {
+          actions.hidden = !actions.hidden;
+          expand.setAttribute("aria-expanded", String(!actions.hidden));
+        };
+        shadow.addEventListener("keydown", (event) => {
+          if ((event as KeyboardEvent).key === "Escape") {
+            close();
+            expand.focus();
+          }
+        });
+        ctx.addEventListener(document, "pointerdown", (event) => {
+          if (!event.composedPath().includes(host!)) close();
+        });
         host.shadowRoot!.querySelector<HTMLButtonElement>("#pause")!.onclick =
           async () => {
             const id = activeId;
@@ -74,6 +94,8 @@ export default defineContentScript({
             }
           };
       }
+      if (theme === "system") delete host.dataset.theme;
+      else host.dataset.theme = theme;
       host.shadowRoot!.querySelector("p")!.textContent = `KeepTemp · ${text}`;
       host.dataset.recording = String(Boolean(activeId));
       host.dataset.state = text.includes("Saved")
@@ -98,12 +120,21 @@ export default defineContentScript({
       inspection.snapshot.id = `thread:${digest}:${inspection.snapshot.id.slice(7)}`;
       return inspection;
     };
-    const send = (type: string, snapshot?: Snapshot, id?: string) =>
-      browser.runtime.sendMessage({
+    const send = async (type: string, snapshot?: Snapshot, id?: string) => {
+      const result = (await browser.runtime.sendMessage({
         type: type.replace("keeptemp:", "keeptemp:generic:"),
         snapshot,
         id,
-      }) as Promise<BridgeResponse>;
+      })) as BridgeResponse;
+      if (result.theme) {
+        theme = result.theme;
+        if (host) {
+          if (theme === "system") delete host.dataset.theme;
+          else host.dataset.theme = theme;
+        }
+      }
+      return result;
+    };
     async function tick() {
       if (busy || !ctx.isValid) return;
       busy = true;
@@ -153,7 +184,7 @@ export default defineContentScript({
         if (snapshot.id !== activeId) {
           activeId = "";
           lastSaved = "";
-          say("已切换会话 · 请重新确认记录");
+          say("已切换会话 · 点击 KeepTemp 记录新对话");
           return;
         }
         const key = JSON.stringify(

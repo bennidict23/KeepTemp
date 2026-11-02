@@ -64,6 +64,13 @@ export default defineBackground(() => {
               ? data.id
               : null;
           const localConsent = await repo.consent();
+          const dark = await repo.darkMode();
+          const theme =
+            dark === undefined
+              ? ("system" as const)
+              : dark
+                ? ("dark" as const)
+                : ("light" as const);
           const currentSession = rawId
             ? await repo.get(scope(rawId))
             : undefined;
@@ -91,7 +98,7 @@ export default defineBackground(() => {
                 ? { sourceOrigin: origin, captureMode: "explicit" as const }
                 : {}),
             };
-            const saved = await repo.capture(snapshot, true);
+            const saved = await repo.capture(snapshot, true, true);
             if (!saved) {
               const s = await repo.get(snapshot.id);
               return {
@@ -103,19 +110,26 @@ export default defineBackground(() => {
                     : "not-saved",
               };
             }
-            return { ok: true, consent: true, saved: true };
+            return {
+              ok: true,
+              consent: true,
+              saved: true,
+              sessionId: snapshot.id,
+              theme,
+            };
           }
           if (generic && type === "keeptemp:state") {
             const session = rawId ? await repo.get(scope(rawId)) : undefined;
             return {
               ok: true,
               consent,
+              theme,
               paused: session?.paused ?? false,
               excluded: Boolean(session?.excluded || session?.deleted),
             };
           }
           if (!consent && !generic)
-            return { ok: true, consent: false, saved: false };
+            return { ok: true, consent: false, saved: false, theme };
           if (type === "keeptemp:capture") {
             if (!validSnapshot(data.snapshot, generic))
               return { ok: false, error: "unsupported-data" };
@@ -147,6 +161,7 @@ export default defineBackground(() => {
           return {
             ok: true,
             consent: true,
+            theme,
             paused: session?.paused ?? false,
             excluded: Boolean(session?.excluded || session?.deleted),
           };

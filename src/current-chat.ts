@@ -2,7 +2,8 @@ import { platformFromUrl } from "./platforms";
 import { browser } from "wxt/browser";
 import type { BridgeResponse } from "./bridge";
 import type { StorageRepository } from "./storage";
-import type { GenericPreview } from "./generic-preview";
+import { genericReason, type GenericPreview } from "./generic-preview";
+import type { GenericReason } from "./generic-adapter";
 export class CurrentChatError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -11,7 +12,7 @@ export class CurrentChatError extends Error {
 export function currentChatError(error: unknown) {
   const code = error instanceof CurrentChatError ? error.code : "";
   const messages: Record<string, string> = {
-    "preview-expired": "网页已切换或预览已失效，请重新点击记录当前对话。",
+    "preview-expired": "网页已切换，请重新点击记录当前对话。",
     "permission-denied": "未获得此网站的访问权限，未保存。",
     "use-toolbar":
       "请先在聊天标签页点击 Chrome 工具栏的 KeepTemp，再点击记录当前对话。",
@@ -29,7 +30,18 @@ export function currentChatError(error: unknown) {
     excluded: "此会话已排除或删除，不会自动恢复保存。",
     busy: "正在保存，请稍后再试。",
   };
-  return messages[code] ?? "暂未保存成功。请保留当前页面，稍后重试。";
+  return (
+    messages[code] ??
+    ([
+      "region-missing",
+      "roles-unknown",
+      "identity-missing",
+      "ambiguous",
+      "unsupported-page",
+    ].includes(code)
+      ? genericReason(code as GenericReason)
+      : "暂未保存成功。请保留当前页面，稍后重试。")
+  );
 }
 export async function recordCurrentChat(
   repo: Pick<StorageRepository, "consent">,
@@ -72,7 +84,7 @@ export async function recordCurrentChat(
     } catch {
       throw new CurrentChatError("site-access");
     }
-    if (result?.ok && result.saved) return;
+    if (result?.ok && result.saved) return result.sessionId;
     if (result?.error !== "busy")
       throw new CurrentChatError(result?.error ?? "storage-failed");
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -82,6 +94,7 @@ export async function recordCurrentChat(
 
 export async function prepareCurrentChat(
   repo: Pick<StorageRepository, "consent">,
+  onSaved?: (id: string) => void,
 ): Promise<GenericPreview | null> {
   if (!(await repo.consent())) throw new CurrentChatError("consent-required");
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -90,7 +103,8 @@ export async function prepareCurrentChat(
   const url = new URL(tab.url);
   if (platformFromUrl(url)) {
     try {
-      await recordCurrentChat(repo);
+      const id = await recordCurrentChat(repo);
+      if (id) onSaved?.(id);
       return null;
     } catch (error) {
       // Explicit recording may fall back to a reviewed copy; automatic temporary
@@ -130,11 +144,13 @@ export async function prepareCurrentChat(
   }
 }
 
-// Invoke directly from the confirmation click: Chrome requires a user gesture.
+// Called within the explicit record action; Chrome may request this site's permission.
 export async function confirmGeneric(preview: GenericPreview) {
-  const granted = await browser.permissions.request({
-    origins: [preview.origin + "/*"],
-  });
+  const granted = await browser.permissions
+    .request({
+      origins: [preview.origin + "/*"],
+    })
+    .catch(() => false);
   if (!granted) throw new CurrentChatError("permission-denied");
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (
@@ -155,16 +171,16 @@ export async function confirmGeneric(preview: GenericPreview) {
   if (!result?.ok || !result.saved)
     throw new CurrentChatError(result?.error ?? "storage-failed");
   // Register only this explicitly granted origin, never a catch-all content script.
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(preview.origin),
-  );
-  const id =
-    "keeptemp-site-" +
-    [...new Uint8Array(hash)]
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
   try {
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(preview.origin),
+    );
+    const id =
+      "keeptemp-site-" +
+      [...new Uint8Array(hash)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
     const existing = await browser.scripting.getRegisteredContentScripts({
       ids: [id],
     });
@@ -182,4 +198,28 @@ export async function confirmGeneric(preview: GenericPreview) {
   } catch {
     /* Persistence succeeded; a future reload can still be attached manually. */
   }
+  return result.sessionId;
+}
+
+// The record button is the user's intent. Extraction/identity checks remain
+// internal; there is no second application confirmation or preview screen.
+export async function recordCurrentPage(
+  repo: Pick<StorageRepository, "consent" | "get">,
+) {
+  let id: string | undefined;
+  const candidate = await prepareCurrentChat(repo, (saved) => {
+    id = saved;
+  });
+  if (candidate) {
+    if (candidate.reason !== "ready")
+      throw new CurrentChatError(candidate.reason);
+    if (!candidate.messages.some((m) => m.text.trim()))
+      throw new CurrentChatError("no-content");
+    id = await confirmGeneric(candidate);
+  }
+  if (!id) throw new CurrentChatError("not-saved");
+  const stored = await repo.get(id);
+  if (!stored || stored.deleted || !stored.messages.length)
+    throw new CurrentChatError("not-saved");
+  return id;
 }

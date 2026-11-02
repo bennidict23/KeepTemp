@@ -1,75 +1,48 @@
-# KeepTemp 架构
+# KeepTemp 架构（0.6.0）
 
-Chrome MV3 / WXT / TypeScript / React / IndexedDB。运行时只有内容脚本、后台和 Side Panel，不含开发测试页面。
+Chrome Manifest V3 / WXT / TypeScript / React / IndexedDB。运行时仅内容脚本、扩展后台与 Side Panel；无后端、远程代码或测试页面。
 
-## 捕获链路
+## 捕获入口
 
-`PlatformAdapter` 负责网页差异，返回平台无关的 Snapshot。`src/platforms.ts` 集中定义精确 origin、来源 ID、新会话链接和实验标记。工厂按 origin 选择适配器；这四家临时自动捕获在模式不确定、角色或身份不可靠时拒绝捕获，不按视觉位置或奇偶猜角色。
+用户首次同意本地保存后，点一次“记录当前对话”。recordCurrentPage 负责接管、内部提取检查、必要的当前网站授权、提交和持久化核实；没有保存前预览或第二次应用确认。普通／未知模式可主动记录。消息无法可靠识别时直接报错，不要求用户逐轮复制整理。
 
-ChatGPT 保留已验收的新旧布局支持：角色标记、语义搜索单元、活动时间线、原生 turn key 和 conversation selection target。Claude 使用 transcript-row 的 human / assistant、会话 URL 与绝对行号；根地址没有原生消息 ID 而只有行号时拒绝。Grok 使用 Private 信号、原生 response ID 和显式角色或用户／助手结构类。Gemini 使用 Temporary header、conversation-container 原生 ID 和 user-query / model-response。三家新增适配为实验支持，证据和限制见 layout-compatibility.md。
+四家临时自动捕获保持原有严格模式识别；主动入口在 regular／temporary-unknown／no-content 时转入 explicit 路径，暂停／排除／存储错误不绕过。以前命名为 preview 的内部请求仅作为当前页面提取与令牌校验，不再构成用户界面。
 
-内容脚本监听变化，每 350ms 至多处理一轮；指纹不含扫描时间，流式回复更新原消息。网页只显示小状态标记，操作折叠。只有授权后才读取聊天快照；主动记录先确认隐私模式。
+## 模块
 
-内容脚本通过 runtime 消息发给 MV3 后台，后台调用 StorageRepository。后台验证扩展 id、精确 origin、顶层 frame、tab id 和有大小上限的 schema。**平台从 sender origin 决定，不信任快照自报来源。**事务完成才返回 saved；失败重试且不虚报成功。
+- PlatformAdapter：src/platforms.ts 定义四家精确 origin 和入口，工厂选择各自 DOM 规则。ChatGPT 支持新旧语义单元与活动时间线；Claude、Grok、Gemini 依赖各自明确角色与原生会话／消息身份。默认自动读取仍须确认临时模式。
+- SessionCapture：内容脚本监听／轮询，原适配每 350ms 至多一轮，通用脚本每 500ms；指纹不含扫描时间，流式文本更新同一消息。小状态标记默认收起控制，Saved 只在提交后显示。后台 runtime 桥验证扩展 id、顶层 frame、origin、tab 和有上限的 schema。
+- GenericChatAdapter：未知站点使用明确角色、原生消息键与共同会话容器／高唯一锚点。已知四家主动路径复用相同 DOM 提取与会话键，避免两套副本。DeepSeek DOM 差异隔离在 deepseek-dom.ts，优先原生虚拟列表、用户折叠正文与助手正文，不依赖 main 存在，不将思考区替代最终回复。
+- StorageRepository：idb 封装 IndexedDB sessions 与布尔 meta。保留 keeptemp-v1 格式、旧会话键和授权，无清库迁移。普通／显式记录策略由 captureMode 与持久化 grant 决定，不取决于厂商名称。
+- RecoveryFormatter：transcript 保留原记录角色与文字；context 添加本机固定接续提示词和不冲突边界。来源不附加到提示词。Markdown／版本化 JSON 保留原记录，不添加接续指令。
+- Side Panel：本地读取、全文搜索、阅读、复制、导出、重命名／删除。React 纯文本插值，不执行聊天 HTML。黑白主题由 CSS 变量与 meta.dark-mode 偏好控制，不加载远程字体。
 
-## 数据与一致性
+存储、搜索和恢复不依赖平台 DOM。
 
-IndexedDB meta.consent 是本地授权。原 ChatGPT 的 meta.chatgpt-consent 键保留，新增平台使用 capture:<platform> 独立布尔键，默认关闭。主页总开关明确启用／关闭四家；主动记录成功只启用当前平台。写入事务同时检查授权、暂停和排除，后台重启后从数据库恢复状态。
+## 身份与增量一致性
 
-会话存储键为平台 + tab id + 适配器会话 ID；旧 ChatGPT 键不变。不同平台和标签页独立。ChatGPT 优先原生 conversation selection target，否则首条用户原生消息／turn id，不因根路径变 /c 路径拆分。其他三家优先原生会话 URL；根地址以原生消息锚定，有共同锚点才连续保存，无共同锚点宁可分段，避免误合并。完全不重叠的虚拟窗口、根地址重载或后来获得原生会话 URL 仍可能分段。
+已知平台使用原来的 platform + tab id + 原生会话 ID。通用站点使用 generic + origin + tab id + 路由摘要 + 原生会话／锚点；原始路径和查询参数不落盘，摘要不提供聊天加密。不同标签页独立。
 
-消息键基于 role + 原生消息／turn key。单会话原子写入，保留首次观察时间，拒绝旧更新。虚拟化移除的已保存消息保留；新发现的旧片段按共同前后锚点插入。无共同锚点时无法保证未知历史绝对位置。不自动滚动，不使用平台 API 补抓。
+消息按 role + 原生消息／turn key 区分，不按交替位置、正文哈希或 viewport 序号猜身份。单会话原子写入，保留首次观察时间，拒绝更旧更新。网页移除的已存消息保留，新发现旧片段按共同前后锚点插入。具有原生会话与稳定消息键的部分虚拟窗口可继续更新，即使用户那一轮已卸载；没有可靠锚点时拒绝或保守拆分。
 
-暂停保存在 Session.paused。排除／删除使用标记或无内容 tombstone 阻止活跃页面回写。全部清空在一个事务内移除内容和授权。旧数据库兼容，升级不清理已有记录。
+重复点记录走真实最新快照提交，更新原记录，不使用上一次 Saved 缓存作为结果。后台返回实际 sessionId，前端读取对应行，只有存在且未删除、有文字时显示成功。成功后清空搜索过滤并回到列表顶部。UI 读代次与 mutationActive 阻止旧轮询读覆盖刚提交的数据，也阻止快速重复点击触发并行保存。
 
-## 会话库与接续
+## 授权、删除与重新记录
 
-Side Panel 本地轮询数据库观察跨页提交；搜索覆盖标题与全文，选中会话独立于搜索过滤，返回恢复列表滚动位置。列表“⋯”重命名／删除；重命名事务不改消息或聊天活动时间，后续捕获保留自定义标题。React 按纯文本展示，不执行保存内容。
+meta.consent 为本地保存授权。ChatGPT 的旧 chatgpt-consent 键保留，其他三家为 capture:<platform>。explicit 记录使用 generic-grant:<scoped-id> 逐会话授权；首轮 grant 与正文在同一事务提交。主页关闭会移除通用 grants，再开启四家总开关不暗中恢复这些授权。
 
-RecoveryFormatter 的 transcript 保留角色与原文字；context 在外层附固定接续提示词和不冲突的边界，要求新模型承接目标、约束、结论、偏好与未完成请求，不重复开场和已完成回答。来源标签只用于会话库和导出，提示词保持平台中立。Markdown 和版本化 JSON 保持原记录，不附带接续提示词。
+暂停／排除会拒绝写入。单条删除用无聊天正文／标题的 tombstone 替换记录，同时撤回该 grant，自动捕获不能使其复活。只有后台处理用户显式 start-current 时传 restartDeleted=true，允许把 tombstone 丢弃后重新保存当前可读快照；不使用删除前的消息、标题或创建时间。失败会 abort，旧 tombstone 与撤权保持。清空在一个事务移除全部记录与 meta。
 
-接续平台下拉只改变打开链接。复制由用户点击触发，之后用户自行在新临时／隐身会话粘贴发送。不自动切换平台模式、不自动输入、不发送、不调用 AI。存储、搜索和恢复不依赖平台 DOM。
+## Chrome 访问与页面接管
 
-## 中途接管
+默认 API 权限 sidePanel、scripting、activeTab；默认 host 与声明式内容脚本仅 chatgpt.com、claude.ai、grok.com、gemini.google.com。optional_host_permissions 的 https://*/* 只是可申请范围，不默认拥有全站访问。无 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage。
 
-current-chat 控制器只查询当前窗口的活动标签页，验证精确 origin，排除共享链接，不挑选其他聊天。先 ping 接收器，缺失时才通过 scripting 补加载同一内容脚本，URL 和 DOM 不重建。
+工具栏使用 action.onClicked，在用户手势内同步 sidePanel.open。原 openPanelOnActionClick 自动打开路径不能提供所需 activeTab，已经用原生工具栏动作回归。侧栏只查当前活动 tab，缺少脚本才补加载同一顶层页面，不导航或刷新聊天。
 
-内容脚本只接受同一扩展页面发出的 inspect / record。inspect 只确认模式；record 抽取快照并发 start-current。后台验证来源、schema 和本地授权。StorageRepository 在一个事务内检查暂停／tombstone、保存快照和开启当前平台自动捕获；失败主动 abort，避免只开启未保存。暂停、排除、删除不会重建。后续复用同一身份和去重，重复接管不增加浮层或会话。
+新网站记录时只申请当前 origin。拒绝／页面切换不保存，后台从 sender 决定来源。提取令牌只能用于同一会话。成功后只注册该精确 origin 的本地脚本以便刷新恢复；通用 entrypoint registration=runtime、matches=[]，避免 WXT 自动扩大默认 host。Chrome 原生授权弹窗属于浏览器权限流程，应用没有额外确认界面。
 
-## 权限与边界
+## 主题与边界
 
-API 权限 sidePanel、scripting、activeTab；默认 host 和声明式内容脚本仅四个 HTTPS origin：chatgpt.com、claude.ai、grok.com、gemini.google.com。不含 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage。CSP connect-src none，不加载远程代码、字体或分析 SDK。
+默认跟随系统黑／白，用户切换后将布尔偏好存入同一数据库并覆盖系统；后台状态响应把主题传给网页小标记。清空数据会清除该偏好。成功／错误用文字和边框区分，不引入额外颜色。
 
-DOM 和模式信号依赖平台布局，三家新增适配尚待真实账号验收。未观察历史、附件、隐藏状态不保存；立即关闭可能丢未提交尾部；跨浏览器重启 tab id 不保证稳定；无分支版本历史；全文搜索适合小库；长上下文仅字符启发；数据库未加密、不替代备份。技术可行不代表采集许可已确认。
-
-## 0.5.0 通用主动保存
-
-新入口 prepareCurrentChat 优先保留四家原适配；未列出的 HTTPS origin 走运行时 generic.content。用 activeTab 补加载后，GenericChatAdapter 检查明确角色属性、原生消息标记、共同会话容器；无容器时要求足够唯一的原生锚点。多段活动区域、重复身份、冲突角色或缺少身份均 fail closed。完整预览只在内存，不持久化，不调用平台服务。角色和正文完全由用户核对，不需要自行整理或逐轮复制。
-
-用户明确选择允许普通／未知模式的主动副本。因此该路径始终标记 captureMode=explicit、temporary=null，不伪造平台临时状态；确认只授权当前会话。确认先请求 origin + /* 的可选权限，再核对活动 tab、预览令牌与当前会话身份；后台从 sender origin 决定来源，不接受自报 origin。generic-grant:<scoped-id> 与首轮记录在同一 IndexedDB 事务写入；失败、暂停、排除／删除不启用授权。
-
-通用键为 generic + origin + tab id + 路由摘要 + 原生会话 ID／锚点。路由在脚本内做 SHA-256，不持久化原始路径或查询参数；改变路由／会话会终止当前授权范围。消息仍复用仓库增量更新与虚拟化顺序逻辑。全局关闭撤回通用 grants，重新开启不会暗中恢复；单条删除也清除该 grant。旧数据库和 ChatGPT 键不变，无迁移清空。
-
-generic.content 的 WXT registration=runtime、matches=[]，避免构建器从兜底匹配自动扩大默认 host 权限。optional_host_permissions 只声明 https://*/* 的可申请范围；确认成功后仅注册已授予的精确 origin。脚本刷新后检查本地授权和已批准的会话 ID，再恢复同一段；新会话没有写入授权。动态注册失败不会把已持久化记录说成丢失，用户可手动重新接管。
-
-DeepSeek 的实验 DOM 分支使用 ds-message、ds-markdown、原生 /a/chat/s/<id> 与 virtual-list-item-key。后一种键仅在已确定原生会话时接受。角色是布局推断，预览中明确标注实验并要求核对；原生临时模式没有确认。不能宣称这是稳定接口或全站任意适配。完整网页重启、布局变化和没有共同锚点仍有边界。
-
-
-## 0.5.1 工具栏与统一主动记录修正
-
-原 openPanelOnActionClick=true 路径能打开侧栏，却不授予 activeTab；已用未改 manifest 的 Chromium 原生工具栏动作复现。现在设置该行为为 false，注册 action.onClicked，在同一用户手势内同步调用 sidePanel.open；不增加 tabs／默认全站权限。跨 origin 导航仍撤回临时访问，下一次工具栏动作才重新授予。
-
-prepareCurrentChat 在四家原适配返回 regular／temporary-unknown／no-content 时进入同一预览，不再把模式未知当作主动记录禁令；暂停、排除、存储错误等保持拒绝。createPlatformPreviewAdapter 仅在用户请求的预览里绕过模式门槛，仍使用同一 DOM、角色与稳定身份校验；默认适配器没有放宽临时自动捕获。
-
-主动脚本使用 keeptemp:generic: 消息命名空间选择 explicit 策略。后台仍由 sender origin 决定实际来源与 origin。已有四家复用原生 scopedChatId，未适配站点仍使用 origin + tab + 路由摘要 + 原生锚点。仓库的 explicit 策略按 captureMode 或已有记录标记决定，和来源标签解耦；首轮 grant 与内容原子写入，后续自动写入保留 explicit 标记和 origin，也检查同一个 grant，避免重复会话或重新扩大授权。内置浮层在主动记录浮层接管时隐藏，DOM 标记只用于停止与隐藏，不能授予写入权限。
-
-Grok 增加 Private／私密字样及带选中状态的可见控制识别。只有“Private”按钮但没有选中证据仍为未知，可进入主动预览，不冒充已经确认隐私模式。实际账号布局仍待验收。
-
-
-## 0.5.2 DeepSeek 区域与正文修正
-
-GenericChatAdapter 将 DeepSeek 的根区域、结构角色和正文提取委托 src/deepseek-dom.ts。优先原生 ds-virtual-list，再退到 visible-items／items 和旧 main 布局；不对所有来源扩大到 body。DeepSeek 的 ds-message 组件优先于外围非消息 data-role 包装，避免虚拟列表的角色属性遮住真正消息。多段可见会话、重复身份与冲突角色仍拒绝。
-
-角色优先明确属性，其次使用 ds-assistant-message-main-content／ds-think-content 标识助手，ds-collapsible-text 标识用户，再保留旧 markdown／纯文本布局。助手正文优先 primary body，排除思考和操作控件并保留多段内容；思考占位到正式回答保持同一个原生消息键，不按正文块拆消息。
-
-缺区域返回 region-missing，和 roles-unknown 分开。失败预览显示“尚未完成识别”，不再把失败的空数组说成已经识别完的 0 条。存储、权限、接续与原生键不变；实际用户布局尚未在开发环境查看。
+DOM 属于平台可变实现细节。未观察历史、附件、隐藏工具状态不保存；未提交流式尾部仍可能因立即关页丢失。跨浏览器重启 tab id 不稳定；无共同原生锚点或根地址变更可能拆分。不自动滚动、不调用平台 API 补抓。数据库未加密，无云备份；技术可行不代表已获采集／发布许可。实际账号灰度布局不由合成测试保证。

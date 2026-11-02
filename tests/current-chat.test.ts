@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({ browser: api }));
 import {
   recordCurrentChat,
+  recordCurrentPage,
   prepareCurrentChat,
   confirmGeneric,
   CurrentChatError,
@@ -256,4 +257,108 @@ describe("built-in manual entry falls back to reviewed recording", () => {
       ).toBe(false);
     },
   );
+});
+
+describe("one-click recording verifies the actual committed row", () => {
+  const stored = {
+    id: "saved-row",
+    source: "generic" as const,
+    title: "synthetic",
+    createdAt: 1,
+    updatedAt: 1,
+    messages: [
+      {
+        id: "m",
+        role: "user" as const,
+        text: "synthetic",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+  };
+  function setupCandidate(reason = "ready") {
+    api.tabs.query.mockResolvedValue([
+      { id: 17, url: preview.origin + "/chat" },
+    ]);
+    api.tabs.sendMessage.mockImplementation(
+      async (_id: number, r: { type: string }) => {
+        if (r.type === "keeptemp:generic-preview")
+          return {
+            ok: true,
+            preview: { ...preview, reason, messages: stored.messages },
+          };
+        if (r.type === "keeptemp:generic-record")
+          return { ok: true, saved: true, sessionId: stored.id };
+        return { ok: true };
+      },
+    );
+    return {
+      consent: async () => true,
+      get: vi.fn().mockResolvedValue(stored),
+    };
+  }
+  it("preflights and commits directly, returning a row that really exists", async () => {
+    const repository = setupCandidate();
+    expect(await recordCurrentPage(repository)).toBe(stored.id);
+    expect(repository.get).toHaveBeenCalledWith(stored.id);
+    expect(
+      api.tabs.sendMessage.mock.calls.some(
+        (c) => c[1].type === "keeptemp:generic-record",
+      ),
+    ).toBe(true);
+  });
+  it.each(["region-missing", "roles-unknown", "identity-missing", "ambiguous"])(
+    "refuses %s without requesting a site grant or claiming success",
+    async (reason) => {
+      const repository = setupCandidate(reason);
+      await expect(recordCurrentPage(repository)).rejects.toMatchObject({
+        code: reason,
+      });
+      expect(api.permissions.request).not.toHaveBeenCalled();
+      expect(repository.get).not.toHaveBeenCalled();
+    },
+  );
+  it("does not trust Saved when no row exists or a concurrent deletion won", async () => {
+    const repository = setupCandidate();
+    repository.get.mockResolvedValue(undefined);
+    await expect(recordCurrentPage(repository)).rejects.toMatchObject({
+      code: "not-saved",
+    });
+    repository.get.mockResolvedValue({
+      ...stored,
+      deleted: true,
+      messages: [],
+    });
+    await expect(recordCurrentPage(repository)).rejects.toMatchObject({
+      code: "not-saved",
+    });
+  });
+  it("records recognized temporary chats with the same durable-row verification", async () => {
+    api.tabs.sendMessage.mockImplementation(
+      async (_id: number, r: { type: string }) =>
+        r.type === "keeptemp:record-current"
+          ? { ok: true, saved: true, sessionId: stored.id }
+          : { ok: true },
+    );
+    expect(
+      await recordCurrentPage({
+        consent: async () => true,
+        get: async () => stored,
+      }),
+    ).toBe(stored.id);
+    expect(api.permissions.request).not.toHaveBeenCalled();
+  });
+  it("permission rejection cannot commit or report success", async () => {
+    const repository = setupCandidate();
+    api.permissions.request.mockResolvedValue(false);
+    await expect(recordCurrentPage(repository)).rejects.toMatchObject({
+      code: "permission-denied",
+    });
+    expect(
+      api.tabs.sendMessage.mock.calls.some(
+        (c) => c[1].type === "keeptemp:generic-record",
+      ),
+    ).toBe(false);
+  });
 });
