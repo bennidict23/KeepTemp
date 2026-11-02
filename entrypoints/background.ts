@@ -1,12 +1,12 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
-import type { Snapshot } from "../src/model";
 import { StorageRepository } from "../src/storage";
 import {
   validSnapshot,
   scopedChatId,
   type BridgeResponse,
-} from "../src/bridge";
+  type Snapshot,
+} from "../src/model";
 export default defineBackground(() => {
   const repo = new StorageRepository();
   // Native side-panel auto-opening does not grant activeTab. Handle the real

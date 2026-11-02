@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { createPlatformAdapter } from "../src/platform-adapter";
+import { createPlatformAdapter } from "../src/adapters/index";
 import { PLATFORMS, platformFromUrl } from "../src/platforms";
-import { validSnapshot, scopedChatId } from "../src/bridge";
+import { validSnapshot, scopedChatId } from "../src/model";
 import { StorageRepository } from "../src/storage";
 import { context } from "../src/recovery";
 import { otherProviders, providerFixture } from "./fixtures";

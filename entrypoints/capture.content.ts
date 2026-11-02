@@ -1,6 +1,6 @@
 import { browser } from "wxt/browser";
-import { createPlatformAdapter } from "../../src/platform-adapter";
-import type { BridgeRequest, BridgeResponse } from "../../src/bridge";
+import { createPlatformAdapter } from "../src/adapters/index";
+import type { BridgeRequest, BridgeResponse } from "../src/model";
 export default defineContentScript({
   matches: [
     "https://chatgpt.com/*",

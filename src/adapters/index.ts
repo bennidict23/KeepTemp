@@ -1,11 +1,6 @@
-import {
-  ChatGPTAdapter,
-  temporaryMode,
-  visible,
-  plainText,
-} from "./chatgpt-adapter";
-import { platformFromUrl, type PlatformId } from "./platforms";
-import type { Message, PlatformAdapter, Role, Snapshot } from "./model";
+import { ChatGPTAdapter, temporaryMode, visible, plainText } from "./chatgpt";
+import { platformFromUrl, type PlatformId } from "../platforms";
+import type { Message, PlatformAdapter, Role, Snapshot } from "../model";
 export interface CaptureAdapter extends PlatformAdapter {
   mode(): boolean | null;
 }
@@ -118,7 +113,7 @@ class OtherAdapter implements CaptureAdapter {
     readonly source: Exclude<PlatformId, "chatgpt">,
     private doc: Document,
     private location: () => URL,
-    private preview = false,
+    private explicit = false,
   ) {}
   mode() {
     return privateMode(this.source, this.doc, this.location());
@@ -131,7 +126,7 @@ class OtherAdapter implements CaptureAdapter {
     )
       return null;
     const temporary = this.mode();
-    if (temporary !== true && !this.preview)
+    if (temporary !== true && !this.explicit)
       return { id: "unknown", source: this.source, temporary, messages: [] };
     const nodes: NodeMessage[] = [];
     let session = "";
@@ -305,11 +300,8 @@ export function createPlatformAdapter(
   return new OtherAdapter(provider.id, doc, location);
 }
 
-// Called only for a user-requested preview. It never enables automatic capture.
-export function createPlatformPreviewAdapter(
-  doc: Document,
-  location: () => URL,
-) {
+// Called only for user-requested recording. It never enables automatic capture.
+export function createExplicitAdapter(doc: Document, location: () => URL) {
   const source = platformFromUrl(location())?.id;
   if (!source) return null;
   if (source === "chatgpt") return new ChatGPTAdapter(doc, location, true);

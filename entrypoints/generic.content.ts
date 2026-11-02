@@ -1,9 +1,7 @@
 import { platformFromUrl } from "../src/platforms";
 import { browser } from "wxt/browser";
-import { GenericChatAdapter } from "../src/generic-adapter";
-import type { GenericPreview } from "../src/generic-preview";
-import type { BridgeResponse } from "../src/bridge";
-import type { Snapshot } from "../src/model";
+import { GenericChatAdapter } from "../src/adapters/generic";
+import type { CaptureCandidate, BridgeResponse, Snapshot } from "../src/model";
 
 export default defineContentScript({
   // Concrete matches are registered only after the user grants that origin.
@@ -231,7 +229,7 @@ export default defineContentScript({
           (inspection) => {
             previewToken = crypto.randomUUID();
             previewId = inspection.snapshot?.id ?? "";
-            const preview: Omit<GenericPreview, "tabId"> = {
+            const preview: Omit<CaptureCandidate, "tabId"> = {
               origin: location.origin,
               token: previewToken,
               id: previewId,

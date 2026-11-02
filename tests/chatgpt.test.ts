@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { ChatGPTAdapter, temporaryMode } from "../src/chatgpt-adapter";
-import { validSnapshot, scopedChatId } from "../src/bridge";
+import { ChatGPTAdapter, temporaryMode } from "../src/adapters/chatgpt";
+import { validSnapshot, scopedChatId } from "../src/model";
 import { shell, turn } from "./fixtures";
 function adapter(html = shell()) {
   document.documentElement.innerHTML = html;

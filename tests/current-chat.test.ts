@@ -61,7 +61,7 @@ describe("start recording an existing chat", () => {
     await recordCurrentChat(repo());
     expect(api.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 17, frameIds: [0] },
-      files: ["/content-scripts/chatgpt.js"],
+      files: ["/content-scripts/capture.js"],
     });
   });
   it("never picks a different chat when the selected page is unrelated", async () => {

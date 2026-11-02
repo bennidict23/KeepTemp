@@ -3,7 +3,8 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "KeepTemp",
-    description: "Keep a local copy. Continue on your terms.",
+    description:
+      "Save AI conversations locally. Find them later and continue in a new chat.",
     permissions: ["sidePanel", "scripting", "activeTab"],
     optional_host_permissions: ["https://*/*"],
     host_permissions: [

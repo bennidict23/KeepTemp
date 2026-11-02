@@ -1,4 +1,4 @@
-import type { Message, PlatformAdapter, Snapshot } from "./model";
+import type { Message, PlatformAdapter, Snapshot } from "../model";
 
 export function visible(el: HTMLElement) {
   if (el.closest('[hidden],[aria-hidden="true"]')) return false;
@@ -179,7 +179,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
   constructor(
     private doc: Document,
     private location: () => URL,
-    private preview = false,
+    private explicit = false,
   ) {}
   read(): Snapshot | null {
     const url = this.location();
@@ -189,7 +189,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
     )
       return null;
     const temporary = temporaryMode(this.doc, url);
-    if (temporary !== true && !this.preview)
+    if (temporary !== true && !this.explicit)
       return { id: "unknown", source: "chatgpt", temporary, messages: [] };
     const nodes = candidateNodes(this.doc).filter(visible);
     const now = Date.now();

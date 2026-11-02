@@ -1,18 +1,10 @@
-import { deepseekRoots, deepseekRole, deepseekText } from "./deepseek-dom";
-import { createPlatformPreviewAdapter } from "./platform-adapter";
-import { plainText, visible } from "./chatgpt-adapter";
-import type { Message, Role, Snapshot } from "./model";
+import { deepseekRoots, deepseekRole, deepseekText } from "./deepseek";
+import { createExplicitAdapter } from "./index";
+import { plainText, visible } from "./chatgpt";
+import type { Message, Role, Snapshot, CaptureIssue } from "../model";
 
-export type GenericReason =
-  | "ready"
-  | "no-content"
-  | "region-missing"
-  | "roles-unknown"
-  | "identity-missing"
-  | "ambiguous"
-  | "unsupported-page";
 export interface GenericInspection {
-  reason: GenericReason;
+  reason: CaptureIssue;
   snapshot?: Snapshot;
   method: "semantic" | "deepseek-layout" | "platform-layout";
 }
@@ -75,12 +67,12 @@ export class GenericChatAdapter {
   private anchor = "";
   private known = new Set<string>();
   private route = "";
-  private platformPreview;
+  private platformAdapter;
   constructor(
     private doc: Document,
     private location: () => URL,
   ) {
-    this.platformPreview = createPlatformPreviewAdapter(doc, location);
+    this.platformAdapter = createExplicitAdapter(doc, location);
   }
   inspect(): GenericInspection {
     const url = this.location();
@@ -89,7 +81,7 @@ export class GenericChatAdapter {
       /\/(share|shared|public)(\/|$)/i.test(url.pathname)
     )
       return { reason: "unsupported-page", method: "semantic" };
-    const platform = this.platformPreview?.read();
+    const platform = this.platformAdapter?.read();
     if (platform?.messages.length)
       return {
         reason: "ready",
@@ -104,7 +96,7 @@ export class GenericChatAdapter {
       };
     const deepseek = url.origin === "https://chat.deepseek.com";
     const method = deepseek ? "deepseek-layout" : "semantic";
-    const fail = (reason: GenericReason): GenericInspection => ({
+    const fail = (reason: CaptureIssue): GenericInspection => ({
       reason,
       method,
     });

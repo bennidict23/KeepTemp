@@ -1,9 +1,7 @@
 import { platformFromUrl } from "./platforms";
 import { browser } from "wxt/browser";
-import type { BridgeResponse } from "./bridge";
+import type { BridgeResponse, CaptureCandidate } from "./model";
 import type { StorageRepository } from "./storage";
-import { genericReason, type GenericPreview } from "./generic-preview";
-import type { GenericReason } from "./generic-adapter";
 export class CurrentChatError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -29,19 +27,16 @@ export function currentChatError(error: unknown) {
     paused: "此会话已暂停。请从网页上的 KeepTemp 菜单恢复后重试。",
     excluded: "此会话已排除或删除，不会自动恢复保存。",
     busy: "正在保存，请稍后再试。",
+    "region-missing":
+      "网页中有消息，但没定位到对话区域，尚未保存；需要适配这个页面布局。",
+    "roles-unknown":
+      "无法可靠区分你和 AI 的消息，尚未保存；这个页面需要进一步适配。",
+    "identity-missing":
+      "页面缺少稳定的消息标记，暂不能可靠追踪更新，尚未保存。",
+    ambiguous: "发现多段或互相冲突的消息，尚未保存；请保留当前页面。",
+    "unsupported-page": "此页面不适合记录；共享链接和非 HTTPS 页面不保存。",
   };
-  return (
-    messages[code] ??
-    ([
-      "region-missing",
-      "roles-unknown",
-      "identity-missing",
-      "ambiguous",
-      "unsupported-page",
-    ].includes(code)
-      ? genericReason(code as GenericReason)
-      : "暂未保存成功。请保留当前页面，稍后重试。")
-  );
+  return messages[code] ?? "暂未保存成功。请保留当前页面，稍后重试。";
 }
 export async function recordCurrentChat(
   repo: Pick<StorageRepository, "consent">,
@@ -63,7 +58,7 @@ export async function recordCurrentChat(
     try {
       await browser.scripting.executeScript({
         target: { tabId, frameIds: [0] },
-        files: ["/content-scripts/chatgpt.js"],
+        files: ["/content-scripts/capture.js"],
       });
     } catch {
       throw new CurrentChatError("site-access");
@@ -95,7 +90,7 @@ export async function recordCurrentChat(
 export async function prepareCurrentChat(
   repo: Pick<StorageRepository, "consent">,
   onSaved?: (id: string) => void,
-): Promise<GenericPreview | null> {
+): Promise<CaptureCandidate | null> {
   if (!(await repo.consent())) throw new CurrentChatError("consent-required");
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined || !tab.url)
@@ -107,7 +102,7 @@ export async function prepareCurrentChat(
       if (id) onSaved?.(id);
       return null;
     } catch (error) {
-      // Explicit recording may fall back to a reviewed copy; automatic temporary
+      // Explicit recording may fall back to a per-conversation copy; automatic temporary
       // capture still refuses normal/unknown mode. Never bypass pause/deletion/errors.
       if (
         !(error instanceof CurrentChatError) ||
@@ -145,7 +140,7 @@ export async function prepareCurrentChat(
 }
 
 // Called within the explicit record action; Chrome may request this site's permission.
-export async function confirmGeneric(preview: GenericPreview) {
+export async function confirmGeneric(preview: CaptureCandidate) {
   const granted = await browser.permissions
     .request({
       origins: [preview.origin + "/*"],

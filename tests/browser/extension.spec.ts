@@ -298,10 +298,13 @@ test("minimal library fits narrow light and dark panels without development tool
   expect(
     (await p.locator("#keeptemp-status").boundingBox())!.height,
   ).toBeLessThan(65);
-  await panel.screenshot({ path: "docs/library-preview.png", fullPage: true });
+  await panel.screenshot({
+    path: "test-results/library-preview.png",
+    fullPage: true,
+  });
   await panel.locator(".session").click();
   await panel.screenshot({
-    path: "docs/sidepanel-preview.png",
+    path: "test-results/sidepanel-preview.png",
     fullPage: true,
   });
   expect(
@@ -383,7 +386,7 @@ test("homepage ellipsis menu renames and deletes without opening the conversatio
   await expect(panel.locator(".session strong")).toHaveText("我的项目讨论");
   await panel.getByRole("button", { name: "会话操作：我的项目讨论" }).click();
   await panel.screenshot({
-    path: "docs/library-menu-preview.png",
+    path: "test-results/library-menu-preview.png",
     fullPage: true,
   });
   panel.once("dialog", (d) => d.dismiss());
@@ -457,7 +460,7 @@ test("hot-attaches when the old content script is absent without reloading the c
   await expect(panel.locator(".session")).toHaveCount(0);
   // Use WXT's context-invalidation signal to remove the receiver and observer.
   // This exercises real missing-script reinjection, not Chrome's extension-reload lifecycle.
-  const eventName = `${new URL(base).host}:chatgpt:wxt:content-script-started`;
+  const eventName = `${new URL(base).host}:capture:wxt:content-script-started`;
   await panel.evaluate(async (name) => {
     const chrome = (
       globalThis as unknown as { chrome: typeof import("wxt/browser").browser }
@@ -469,7 +472,7 @@ test("hot-attaches when the old content script is absent without reloading the c
         document.dispatchEvent(
           new CustomEvent(event, {
             detail: {
-              contentScriptName: "chatgpt",
+              contentScriptName: "capture",
               messageId: "synthetic-invalidation",
             },
           }),
@@ -571,7 +574,7 @@ test("four platform origins stay independent; cross-platform handoff remains neu
   }
   await expect(panel.locator(".session")).toHaveCount(4);
   await panel.screenshot({
-    path: "docs/multiplatform-preview.png",
+    path: "test-results/multiplatform-preview.png",
     fullPage: true,
   });
   await panel
@@ -593,7 +596,7 @@ test("four platform origins stay independent; cross-platform handoff remains neu
     expect(copied).not.toContain(brand);
   await expect(panel.locator(".meta")).toContainText("ChatGPT");
   await panel.screenshot({
-    path: "docs/cross-platform-preview.png",
+    path: "test-results/cross-platform-preview.png",
     fullPage: true,
   });
   await panel
@@ -1083,7 +1086,10 @@ test("light and dark toggle is monochrome, accessible, persistent and reaches th
   await assertNeutral();
   if (await panel.getByRole("button", { name: "关闭提示" }).isVisible())
     await panel.getByRole("button", { name: "关闭提示" }).click();
-  await panel.screenshot({ path: "docs/library-light.png", fullPage: true });
+  await panel.screenshot({
+    path: "test-results/library-light.png",
+    fullPage: true,
+  });
   await panel.getByRole("button", { name: "切换为深色" }).click();
   await expect(panel.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(p.locator("#keeptemp-status")).toHaveAttribute(
@@ -1091,7 +1097,10 @@ test("light and dark toggle is monochrome, accessible, persistent and reaches th
     "dark",
   );
   await assertNeutral();
-  await panel.screenshot({ path: "docs/library-dark.png", fullPage: true });
+  await panel.screenshot({
+    path: "test-results/library-dark.png",
+    fullPage: true,
+  });
   await panel.reload();
   await expect(panel.getByRole("button", { name: "切换为浅色" })).toBeVisible();
   await expect(panel.locator("html")).toHaveAttribute("data-theme", "dark");

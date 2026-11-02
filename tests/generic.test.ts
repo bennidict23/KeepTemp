@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { GenericChatAdapter } from "../src/generic-adapter";
+import { GenericChatAdapter } from "../src/adapters/generic";
 import { StorageRepository } from "../src/storage";
-import { validSnapshot, scopedChatId } from "../src/bridge";
+import { validSnapshot, scopedChatId } from "../src/model";
 import {
   genericFixture,
   genericTurn,

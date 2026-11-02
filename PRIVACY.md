@@ -1,6 +1,6 @@
 # 隐私与安全边界
 
-KeepTemp 0.6.0 将对话标题、来源、角色、文字、顺序、观察时间、暂停／排除状态、保存授权及明暗主题偏好保存在扩展 origin 的 IndexedDB。没有后台服务器、注册、API Key、云同步、遥测、分析 SDK 或错误上报。不上传对话，生产扩展 CSP 禁止网络连接。
+KeepTemp 将对话标题、来源、角色、文字、顺序、观察时间、暂停／排除状态、保存授权及明暗主题偏好保存在扩展 origin 的 IndexedDB。没有后台服务器、注册、API Key、云同步、遥测、分析 SDK 或错误上报。不上传对话，生产扩展 CSP 禁止网络连接。
 
 ## 何时保存
 
@@ -12,7 +12,7 @@ KeepTemp 0.6.0 将对话标题、来源、角色、文字、顺序、观察时�
 
 默认声明式脚本和 host 权限只覆盖 https://chatgpt.com/*、https://claude.ai/*、https://grok.com/* 和 https://gemini.google.com/*。API 权限为 sidePanel、scripting、activeTab，无 cookies、webRequest、tabs、clipboardRead 或 unlimitedStorage。
 
-其他 HTTPS 网站属于 optional_host_permissions 的可申请范围 https://*/*，不是默认全站授权。工具栏 action 先授予当前页临时访问；点击记录时只申请当前 origin。授权并成功保存后可注册该精确 origin 的本地脚本以便刷新恢复。Chrome 网站权限及动态注册不会因本地清空自动撤回，可在扩展设置收回；本地撤权后不再自动读取／写入聊天快照。
+其他 HTTPS 网站属于 optional_host_permissions 的可申请范围 https://_/_，不是默认全站授权。工具栏 action 先授予当前页临时访问；点击记录时只申请当前 origin。授权并成功保存后可注册该精确 origin 的本地脚本以便刷新恢复。Chrome 网站权限及动态注册不会因本地清空自动撤回，可在扩展设置收回；本地撤权后不再自动读取／写入聊天快照。
 
 ## 数据与删除
 

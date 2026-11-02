@@ -1,5 +1,5 @@
-import { plainText, visible } from "./chatgpt-adapter";
-import type { Role } from "./model";
+import { plainText, visible } from "./chatgpt";
+import type { Role } from "../model";
 
 // Source-specific scopes, not body-wide harvesting. Newer DeepSeek layouts put
 // the chat in a div virtual list and may have no main/role=main at all.
