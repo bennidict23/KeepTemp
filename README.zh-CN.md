@@ -28,6 +28,8 @@
 - **🔎 随时找回。** ChatGPT 和 Claude 共用一份本机会话库，保留来源标签，支持全文搜索。通过 **⋯** 重命名或删除，也能导出 Markdown／JSON。
 - **🔁 复制接续。** 一次复制完整记录与接续提示词，粘贴到新聊天。可以继续用原来的 AI，也可以换到另一个平台，省去重新解释背景的过程；由你决定在哪里粘贴和发送。
 
+侧栏集成从 ChatGPT 和 Claude 开始。后续有时间会逐步适配 Gemini、Grok、DeepSeek 等平台，共用同一份本机历史。
+
 <div align="center">
 
 <a href="docs/local-history.png"><img src="docs/local-history.png" width="960" alt="完整 ChatGPT 页面：原生侧栏、KeepTemp 本机记录、复制接续与导出入口"></a>

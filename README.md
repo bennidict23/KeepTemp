@@ -28,6 +28,8 @@ You open a temporary or incognito chat to keep it out of the shared history. The
 - **🔎 Find your own history.** ChatGPT and Claude share one local library, with source labels and full-text search. Rename or delete through the **⋯** menu, and export Markdown or JSON.
 - **🔁 Copy & continue.** Copy the complete stored transcript and a continuation prompt into a new chat. Stay with the same AI or switch platforms without explaining the background all over again. You choose where to paste and send.
 
+Sidebar integration starts with ChatGPT and Claude. As time allows, I plan to bring the same local history to Gemini, Grok, DeepSeek, and other AI platforms.
+
 <div align="center">
 
 <a href="docs/local-history.png"><img src="docs/local-history.png" width="960" alt="The full ChatGPT page showing its original sidebar alongside a saved KeepTemp conversation, Copy & continue and export"></a>
