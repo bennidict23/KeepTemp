@@ -57,3 +57,7 @@ export function genericTurn(
 export function deepseekFixture() {
   return '<!doctype html><html><head><meta charset="UTF-8"></head><body><main><div data-virtual-list-item-key="10"><div class="ds-message">DeepSeek 合成问题</div></div><div data-virtual-list-item-key="11"><div class="ds-message"><div class="ds-markdown"><p data-stream>DeepSeek 合成回复</p><p>保留第二段</p></div><button>复制</button></div></div></main></body></html>';
 }
+
+export function deepseekVirtualFixture() {
+  return '<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="root"><nav><div class="ds-message">合成侧栏，不应采集</div></nav><div class="ds-virtual-list ds-scroll-area"><div class="ds-virtual-list-items"><div class="ds-virtual-list-visible-items"><div data-virtual-list-item-key="10" data-role="virtual-item"><div class="ds-message"><div class="ds-collapsible-text">DeepSeek 合成问题</div></div></div><div data-virtual-list-item-key="11" data-role="virtual-item"><div class="ds-message"><div class="ds-think-content"><div class="ds-markdown">合成思考，不属于回复正文</div></div><div class="ds-assistant-message-main-content"><div class="ds-markdown"><p data-stream>DeepSeek 合成回复</p></div><div class="ds-markdown"><p>保留第二段</p></div></div><button>复制</button></div></div></div></div></div><div role="dialog"><div class="ds-message">合成弹窗，不应采集</div></div><textarea class="ds-scroll-area">合成输入，不应采集</textarea></div></body></html>';
+}

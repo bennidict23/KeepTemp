@@ -13,6 +13,8 @@ export function genericReason(reason: GenericReason) {
   return {
     ready: "",
     "no-content": "没有找到可识别的聊天消息，尚未保存。",
+    "region-missing":
+      "网页中有消息，但没定位到对话区域，尚未保存；需要适配这个页面布局。",
     "roles-unknown":
       "无法可靠区分你和 AI 的消息，尚未保存；这个页面需要进一步适配。",
     "identity-missing":

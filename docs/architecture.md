@@ -64,3 +64,12 @@ prepareCurrentChat 在四家原适配返回 regular／temporary-unknown／no-con
 主动脚本使用 keeptemp:generic: 消息命名空间选择 explicit 策略。后台仍由 sender origin 决定实际来源与 origin。已有四家复用原生 scopedChatId，未适配站点仍使用 origin + tab + 路由摘要 + 原生锚点。仓库的 explicit 策略按 captureMode 或已有记录标记决定，和来源标签解耦；首轮 grant 与内容原子写入，后续自动写入保留 explicit 标记和 origin，也检查同一个 grant，避免重复会话或重新扩大授权。内置浮层在主动记录浮层接管时隐藏，DOM 标记只用于停止与隐藏，不能授予写入权限。
 
 Grok 增加 Private／私密字样及带选中状态的可见控制识别。只有“Private”按钮但没有选中证据仍为未知，可进入主动预览，不冒充已经确认隐私模式。实际账号布局仍待验收。
+
+
+## 0.5.2 DeepSeek 区域与正文修正
+
+GenericChatAdapter 将 DeepSeek 的根区域、结构角色和正文提取委托 src/deepseek-dom.ts。优先原生 ds-virtual-list，再退到 visible-items／items 和旧 main 布局；不对所有来源扩大到 body。DeepSeek 的 ds-message 组件优先于外围非消息 data-role 包装，避免虚拟列表的角色属性遮住真正消息。多段可见会话、重复身份与冲突角色仍拒绝。
+
+角色优先明确属性，其次使用 ds-assistant-message-main-content／ds-think-content 标识助手，ds-collapsible-text 标识用户，再保留旧 markdown／纯文本布局。助手正文优先 primary body，排除思考和操作控件并保留多段内容；思考占位到正式回答保持同一个原生消息键，不按正文块拆消息。
+
+缺区域返回 region-missing，和 roles-unknown 分开。失败预览显示“尚未完成识别”，不再把失败的空数组说成已经识别完的 0 条。存储、权限、接续与原生键不变；实际用户布局尚未在开发环境查看。

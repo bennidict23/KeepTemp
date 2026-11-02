@@ -6,6 +6,7 @@ import {
   genericFixture,
   genericTurn,
   deepseekFixture,
+  deepseekVirtualFixture,
   otherProviders,
   providerFixture,
   shell,
@@ -324,4 +325,94 @@ describe("manual platform previews never invent temporary mode", () => {
       snapshot: { temporary: null },
     });
   });
+});
+
+describe("DeepSeek native virtual list without a semantic main", () => {
+  it("extracts role bodies from the virtual list, not the thinking panel or toolbar", () => {
+    const result = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic-new-layout",
+    ).engine.inspect();
+    expect(result.reason).toBe("ready");
+    expect(result.snapshot?.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "DeepSeek 合成问题"],
+      ["assistant", "DeepSeek 合成回复\n\n保留第二段"],
+    ]);
+  });
+  it("keeps the native reply identity while the thinking-only placeholder becomes a final answer", () => {
+    const { engine } = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic-new-layout",
+    );
+    const body = document.querySelector<HTMLElement>(
+      ".ds-assistant-message-main-content",
+    )!;
+    const markup = body.innerHTML;
+    body.innerHTML = "";
+    const initial = engine.inspect().snapshot!;
+    expect(initial?.messages[1]).toMatchObject({ role: "assistant", text: "" });
+    body.innerHTML = markup;
+    expect(engine.inspect().snapshot?.messages[1]?.id).toBe(
+      initial.messages[1]!.id,
+    );
+  });
+});
+
+describe("DeepSeek layout safety", () => {
+  it("keeps markdown inside a user collapsible bubble in the user role", () => {
+    const { engine } = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic",
+    );
+    document.querySelector(".ds-collapsible-text")!.innerHTML =
+      '<div class="ds-markdown"><pre>合成用户代码</pre></div>';
+    expect(engine.inspect().snapshot?.messages[0]).toMatchObject({
+      role: "user",
+      text: "合成用户代码",
+    });
+  });
+  it("does not resolve conflicting explicit roles by guessing from layout", () => {
+    const { engine } = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic",
+    );
+    const user = document.querySelector<HTMLElement>(
+      ".ds-message:not(nav .ds-message)",
+    )!;
+    user.dataset.messageRole = "user";
+    user.dataset.role = "assistant";
+    expect(engine.inspect().reason).toBe("ambiguous");
+  });
+  it("rejects two visible virtual conversations, hidden copies do not count", () => {
+    const { engine } = adapter(
+      deepseekVirtualFixture(),
+      "https://chat.deepseek.com/a/chat/s/synthetic",
+    );
+    const copy = document
+      .querySelector<HTMLElement>(".ds-virtual-list")!
+      .cloneNode(true) as HTMLElement;
+    document.body.append(copy);
+    expect(engine.inspect().reason).toBe("ambiguous");
+    copy.hidden = true;
+    expect(engine.inspect().snapshot?.messages).toHaveLength(2);
+  });
+  it("reports a missing region separately from unrecognized speakers", () => {
+    const { engine } = adapter(
+      '<div><div class="ds-message">synthetic</div></div>',
+      "https://chat.deepseek.com/a/chat/s/synthetic",
+    );
+    expect(engine.inspect().reason).toBe("region-missing");
+  });
+  it.each([".ds-virtual-list-visible-items", ".ds-virtual-list-items"])(
+    "supports the %s root without a main or virtual-list wrapper",
+    (selector) => {
+      const { engine } = adapter(
+        deepseekVirtualFixture(),
+        "https://chat.deepseek.com/a/chat/s/synthetic",
+      );
+      const content = document.querySelector(selector)!.outerHTML;
+      document.body.innerHTML = content;
+      expect(engine.inspect().snapshot?.messages).toHaveLength(2);
+    },
+  );
 });

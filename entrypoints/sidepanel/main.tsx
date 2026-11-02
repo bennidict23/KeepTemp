@@ -434,8 +434,11 @@ function App() {
                 </button>
               </div>
               <small>
-                {new URL(preview.origin).hostname} · {preview.messages.length}{" "}
-                条消息 · 通用识别（实验）
+                {new URL(preview.origin).hostname} ·{" "}
+                {preview.reason === "ready"
+                  ? `${preview.messages.length} 条消息`
+                  : "尚未完成识别"}{" "}
+                · 通用识别（实验）
               </small>
               <p className="notice">
                 KeepTemp

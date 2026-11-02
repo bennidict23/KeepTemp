@@ -1,3 +1,4 @@
+import { deepseekRoots, deepseekRole, deepseekText } from "./deepseek-dom";
 import { createPlatformPreviewAdapter } from "./platform-adapter";
 import { plainText, visible } from "./chatgpt-adapter";
 import type { Message, Role, Snapshot } from "./model";
@@ -5,6 +6,7 @@ import type { Message, Role, Snapshot } from "./model";
 export type GenericReason =
   | "ready"
   | "no-content"
+  | "region-missing"
   | "roles-unknown"
   | "identity-missing"
   | "ambiguous"
@@ -17,7 +19,7 @@ export interface GenericInspection {
 const roleSelector =
   "[data-message-author-role],[data-message-role],[data-author-role],[data-role]";
 const excluded =
-  'aside,nav,form,[contenteditable="true"],[role="presentation"],blockquote,pre,code,#keeptemp-status';
+  'aside,nav,form,[contenteditable="true"],[role="presentation"],[role="dialog"],[role="menu"],blockquote,pre,code,#keeptemp-status';
 function roleOf(el: HTMLElement): Role | null {
   const values = [
     el.dataset.messageAuthorRole,
@@ -53,12 +55,11 @@ function identity(el: HTMLElement, root: HTMLElement) {
   }
   return null;
 }
-function bodyText(el: HTMLElement, deepseek: boolean) {
+function bodyText(el: HTMLElement, deepseek: boolean, role: Role) {
+  if (deepseek) return deepseekText(el, role);
   const body =
     el.querySelector<HTMLElement>(
-      deepseek
-        ? ".ds-markdown"
-        : '[data-message-content],[data-testid="message-content"],.markdown',
+      '[data-message-content],[data-testid="message-content"],.markdown',
     ) ?? el;
   const copy = body.cloneNode(true) as HTMLElement;
   copy
@@ -107,23 +108,29 @@ export class GenericChatAdapter {
       reason,
       method,
     });
-    const roots = [
-      ...this.doc.querySelectorAll<HTMLElement>(
-        'main,[role="main"],[role="log"]',
-      ),
-    ].filter((el) => visible(el) && !el.closest(excluded));
+    const roots = deepseek
+      ? deepseekRoots(this.doc, excluded)
+      : [
+          ...this.doc.querySelectorAll<HTMLElement>(
+            'main,[role="main"],[role="log"]',
+          ),
+        ].filter((el) => visible(el) && !el.closest(excluded));
     const outerRoots = roots.filter(
       (el) => !roots.some((parent) => parent !== el && parent.contains(el)),
     );
-    const candidates = outerRoots.flatMap((root) =>
-      [
-        ...root.querySelectorAll<HTMLElement>(
-          deepseek ? `${roleSelector},.ds-message` : roleSelector,
-        ),
-      ]
+    const candidates = outerRoots.flatMap((root) => {
+      const ds = deepseek
+        ? [...root.querySelectorAll<HTMLElement>(".ds-message")]
+        : [];
+      // Message components win over unrelated data-role attributes on virtual
+      // list wrappers. Those wrapper attributes do not describe a speaker.
+      const elements = ds.length
+        ? ds
+        : [...root.querySelectorAll<HTMLElement>(roleSelector)];
+      return elements
         .filter((el) => visible(el) && !el.closest(excluded))
-        .map((el) => ({ el, root })),
-    );
+        .map((el) => ({ el, root }));
+    });
     // Outermost message wrappers win, but conflicting nested roles are rejected below.
     const nodes = candidates.filter(
       ({ el }) =>
@@ -134,8 +141,8 @@ export class GenericChatAdapter {
     if (nodes.length > 10000) return fail("ambiguous");
     if (!nodes.length)
       return fail(
-        deepseek && this.doc.querySelector(".ds-message")
-          ? "roles-unknown"
+        deepseek && !roots.length && this.doc.querySelector(".ds-message")
+          ? "region-missing"
           : "no-content",
       );
     const usedRoots = new Set(nodes.map((n) => n.root));
@@ -149,15 +156,27 @@ export class GenericChatAdapter {
     let commonThread: HTMLElement | null | undefined;
     for (const { el, root } of nodes) {
       let role = roleOf(el);
-      // DeepSeek's published DOM shape has unlabelled user bubbles and markdown
-      // assistant bubbles. This is shown as an experimental, reviewed extraction.
       if (
+        !role &&
+        [
+          el.dataset.messageAuthorRole,
+          el.dataset.messageRole,
+          el.dataset.authorRole,
+          el.dataset.role,
+        ].some((v) => /^(user|human|assistant|model|bot|ai)$/i.test(v ?? ""))
+      )
+        return fail("ambiguous");
+      if (!role && deepseek && !el.matches(roleSelector))
+        role = deepseekRole(el);
+      else if (
         !role &&
         deepseek &&
         el.matches(".ds-message") &&
-        !el.matches(roleSelector)
+        el.querySelector(
+          ".ds-collapsible-text,.ds-assistant-message-main-content,.ds-think-content",
+        )
       )
-        role = el.querySelector(".ds-markdown") ? "assistant" : "user";
+        role = deepseekRole(el);
       if (!role) return fail("roles-unknown");
       for (const child of el.querySelectorAll<HTMLElement>(roleSelector)) {
         const childRole = roleOf(child);
@@ -182,7 +201,7 @@ export class GenericChatAdapter {
       messages.push({
         id,
         role,
-        text: bodyText(el, deepseek),
+        text: bodyText(el, deepseek, role),
         order: messages.length,
         createdAt: now,
         updatedAt: now,

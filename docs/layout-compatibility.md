@@ -33,3 +33,14 @@ DeepSeek 仅 chat.deepseek.com 的实验分支参考 [作者的 DOM 实现](http
 通用模式不判断平台是否真的临时，记录始终标注“主动记录，网站历史可能存在”。已有四家临时自动捕获不放宽此判断。刷新可恢复同一批准会话；路由变化，即使原生会话键相同也要求再次确认，宁可分段而不沿用到新会话。
 
 0.5.1：用户确认 Grok 按钮文字为 Private／私密聊天。自动模式识别增加此标签的可见选中状态；没有选中证据的按钮仍未知。主动预览可复用四家已有稳定 DOM 提取，绕过模式门槛但不绕过角色、身份和来源校验。相同原生会话沿用原来的存储键，避免后备记录与后来自动识别产生两个副本。实际 Grok 灰度布局仍未由开发环境验收。
+
+
+## 0.5.2：DeepSeek 无 main 的虚拟列表
+
+用户反馈“0 条、无法区分你和 AI”。代码中确认一个可复现缺陷：只查 main／role=main／log，导致存在 ds-message 但位于独立 div 虚拟列表时返回 roles-unknown。旧合成样本全包在 main 中，没有覆盖这个前提。该复现不等于已经查看并确认用户实际 DOM。
+
+新增结构依据：[Voyager 的 DeepSeek 站点声明](https://github.com/Nagi-ovo/gemini-voyager/blob/main/src/features/plugins/catalog/sites/deepseek/site.json) 给出原生虚拟滚动区、用户 collapsible-text、助手 main-content／think-content 结构和原生 virtual-list-item-key。[DeepSeekExporter 作者源码](https://github.com/fastnow/UserJs/blob/main/DeepSeekExporter.user.js) 也包含虚拟列表可见容器。这些是第三方作者的原始工程资料，不是 DeepSeek 的稳定接口或采集许可。只参考 DOM 线索，不采用私有请求、凭据或自动滚动。
+
+修复为优先原生虚拟列表与消息组件，保留旧布局；不让外围 data-role=virtual-item 冒充发言角色。用户正文中渲染的 markdown 仍为用户；助手思考占位与最终回复共用同一个原生消息 ID；多个正文块不丢失，也不拆成多条。排除侧栏、弹窗、菜单、输入区；多个可见原生对话区和冲突角色仍拒绝。
+
+新增合成复现和浏览器回归包括：完全无 main、原生虚拟列表与非消息角色包装、两段助手正文及独立思考区、流式更新、刷新／关页持久化、复制一致，以及缺区域失败提示。真实账号仍待用户重试验收，不宣称全部布局已兼容。

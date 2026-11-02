@@ -16,6 +16,7 @@ import {
   genericFixture,
   genericTurn,
   deepseekFixture,
+  deepseekVirtualFixture,
 } from "../fixtures";
 let browser: BrowserContext, base: string, profile: string, panel: Page;
 test.beforeAll(async () => {
@@ -932,3 +933,64 @@ for (const source of ["chatgpt", ...otherProviders] as const) {
     await expect(panel.locator(".session")).toHaveCount(1);
   });
 }
+
+test("DeepSeek div virtual list previews, streams and persists the full answer without thinking text", async () => {
+  const p = await genericChat(
+    "https://chat.deepseek.com",
+    deepseekVirtualFixture(),
+    "/a/chat/s/synthetic-virtual",
+  );
+  expect(await p.locator('main,[role="main"]').count()).toBe(0);
+  await previewPage(p);
+  await expect(panel.locator(".preview-messages article")).toHaveCount(2);
+  await expect(panel.locator(".preview-messages")).toContainText("保留第二段");
+  await expect(panel.locator(".preview-messages")).not.toContainText(
+    "合成思考",
+  );
+  await expect(panel.locator(".preview-messages")).not.toContainText(
+    "合成侧栏",
+  );
+  await confirmPage(p);
+  await panel.locator(".session").click();
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await p.evaluate(async () => {
+    for (let i = 0; i < 25; i++) {
+      document.querySelector("[data-stream]")!.textContent =
+        "虚拟列表回复 " + i;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  });
+  await expect(panel.locator(".messages")).toContainText("虚拟列表回复 24");
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await panel.getByRole("button", { name: "复制并接续" }).click();
+  const copied = await panel.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("[assistant]\n虚拟列表回复 24\n\n保留第二段");
+  expect(copied).not.toContain("合成思考");
+  await p.reload();
+  await expect(p.locator("#keeptemp-status").getByRole("status")).toContainText(
+    "Saved",
+  );
+  await expect(panel.locator(".messages article")).toHaveCount(2);
+  await p.close();
+  await panel.reload();
+  await expect(panel.locator(".session")).toHaveCount(1);
+});
+
+test("DeepSeek missing-region failure is distinct and never presents zero as a finished extraction", async () => {
+  const p = await genericChat(
+    "https://chat.deepseek.com",
+    '<html><head><meta charset="UTF-8"></head><body><div class="ds-message">合成布局，不含对话区域</div></body></html>',
+    "/a/chat/s/synthetic-missing",
+  );
+  await previewPage(p);
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
+    "尚未完成识别",
+  );
+  await expect(panel.getByRole("region", { name: "保存前预览" })).toContainText(
+    "没定位到对话区域",
+  );
+  await expect(
+    panel.getByRole("button", { name: "确认并记录此对话" }),
+  ).toHaveCount(0);
+  await expect(panel.locator(".session")).toHaveCount(0);
+});

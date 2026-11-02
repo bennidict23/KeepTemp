@@ -57,3 +57,8 @@
 依据 [Chrome activeTab 文档](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab)、[Chrome 团队的侧栏指导](https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/chrome-extensions/references/extensions/side-panel.md) 与 [Chromium 讨论](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/DET2SXCFnDg)，侧栏内点击不等价于调用扩展 action。实现注册真正 action 点击，保持临时授权语义，不改成全站读取。回归用 [Extensions.triggerAction](https://chromedevtools.github.io/devtools-protocol/tot/Extensions/#method-triggerAction) 触发 Chrome 原生 action，不直接调用应用回调，也不预先赋予测试域名权限。
 
 第二项包含产品路径遗漏：已有适配站点仍被模式检查挡在通用预览之外。0.5.1 已统一主动入口，普通／未知模式也可预览确认。补充 Private 可见选中信号；仅按钮文字不足时不声称已确认隐私。Grok 的真实 DOM 仍需用户验收，但模式未知本身不再阻止主动副本。
+
+
+## 0.5.2 DeepSeek 布局缺陷
+
+当前错误可在无 main 的合成虚拟列表复现。新增依据为 [Voyager 作者的 DeepSeek 站点配置](https://github.com/Nagi-ovo/gemini-voyager/blob/main/src/features/plugins/catalog/sites/deepseek/site.json)，包含独立原生虚拟列表、用户／助手组件和消息键。修复仅调整 DOM 区域和正文识别，不增加权限，不读取用户私人页面。用户实际 DOM 尚未查看，因此需要重试验证；不能把这个合成复现当成真实账号已经修复的证据。
